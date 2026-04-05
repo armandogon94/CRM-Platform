@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Next.js / Vite
+.next/
+out/
+.turbo/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+
+# Cache
+.ruff_cache/
+tsconfig.tsbuildinfo
+
+# Docker
+docker-compose.override.yml
+
+# Misc
+*.log
+npm-debug.log*
+
+# Claude Code - user specific
+.claude/projects/
