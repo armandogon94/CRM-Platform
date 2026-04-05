@@ -1,6 +1,6 @@
 # CRM Platform
 
-A high-fidelity Monday.com clone — multi-tenant work management CRM with runtime-configurable boards, 8 view types, visual automations, and 10 industry verticals.
+Multi-tenant work management platform with runtime-configurable boards, 8 view types, visual automations, and 10 industry verticals.
 
 [![Node.js 20+](https://img.shields.io/badge/Node.js-20+-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![React 18](https://img.shields.io/badge/React-18+-61DAFB?logo=react&logoColor=black)](https://reactjs.org/)
@@ -9,7 +9,7 @@ A high-fidelity Monday.com clone — multi-tenant work management CRM with runti
 
 ## Core Differentiator
 
-**Entity-Attribute-Value (EAV) system** allows users to create, customize, and manage unlimited column types (Status, Text, Number, Date, Person, Dropdown, Timeline, Files, Formulas) at runtime — exactly like Monday.com.
+**Entity-Attribute-Value (EAV) system** allows users to create, customize, and manage unlimited column types (Status, Text, Number, Date, Person, Dropdown, Timeline, Files, Formulas) at runtime — fully dynamic, no schema changes required.
 
 ## Features
 
