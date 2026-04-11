@@ -1,6 +1,7 @@
 import { Transaction } from 'sequelize';
 import { sequelize, Column, ColumnValue, ActivityLog } from '../models';
 import { AuthUser } from '../types';
+import wsService from './WebSocketService';
 
 const VALID_COLUMN_TYPES = [
   'status',
@@ -92,6 +93,7 @@ export default class ColumnService {
       );
 
       await transaction.commit();
+      wsService.emitToBoard(boardId, 'column:created', column);
       return column;
     } catch (error) {
       await transaction.rollback();
@@ -151,6 +153,7 @@ export default class ColumnService {
       );
 
       await transaction.commit();
+      wsService.emitToBoard(boardId, 'column:updated', column);
       return column;
     } catch (error) {
       await transaction.rollback();
@@ -198,6 +201,7 @@ export default class ColumnService {
       );
 
       await transaction.commit();
+      wsService.emitToBoard(boardId, 'column:deleted', { id, boardId });
     } catch (error) {
       await transaction.rollback();
       throw error;
@@ -237,10 +241,12 @@ export default class ColumnService {
 
       await transaction.commit();
 
-      return Column.findAll({
+      const columns = await Column.findAll({
         where: { boardId },
         order: [['position', 'ASC']],
       });
+      wsService.emitToBoard(boardId, 'columns:reordered', { boardId, columns });
+      return columns;
     } catch (error) {
       await transaction.rollback();
       throw error;

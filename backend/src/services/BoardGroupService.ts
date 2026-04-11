@@ -1,6 +1,7 @@
 import { Transaction } from 'sequelize';
 import { sequelize, BoardGroup, Item, ActivityLog } from '../models';
 import { AuthUser } from '../types';
+import wsService from './WebSocketService';
 
 export default class BoardGroupService {
   /**
@@ -58,6 +59,7 @@ export default class BoardGroupService {
       );
 
       await transaction.commit();
+      wsService.emitToBoard(boardId, 'group:created', group);
       return group;
     } catch (error) {
       await transaction.rollback();
@@ -112,6 +114,7 @@ export default class BoardGroupService {
       );
 
       await transaction.commit();
+      wsService.emitToBoard(boardId, 'group:updated', group);
       return group;
     } catch (error) {
       await transaction.rollback();
@@ -170,6 +173,7 @@ export default class BoardGroupService {
       );
 
       await transaction.commit();
+      wsService.emitToBoard(boardId, 'group:deleted', { id, boardId });
     } catch (error) {
       await transaction.rollback();
       throw error;
@@ -209,10 +213,12 @@ export default class BoardGroupService {
 
       await transaction.commit();
 
-      return BoardGroup.findAll({
+      const groups = await BoardGroup.findAll({
         where: { boardId },
         order: [['position', 'ASC']],
       });
+      wsService.emitToBoard(boardId, 'groups:reordered', { boardId, groups });
+      return groups;
     } catch (error) {
       await transaction.rollback();
       throw error;

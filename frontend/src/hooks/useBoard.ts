@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { Board, Item } from '@/types';
+import type { Board, Item, BoardGroup, Column, ColumnValue } from '@/types';
+import { useWebSocket } from './useWebSocket';
 import api from '@/utils/api';
 
 interface UseBoardReturn {
@@ -7,11 +8,77 @@ interface UseBoardReturn {
   items: Item[];
   loading: boolean;
   error: string | null;
+  isConnected: boolean;
   refreshBoard: () => Promise<void>;
   refreshItems: (page?: number, limit?: number) => Promise<void>;
   totalItems: number;
   currentPage: number;
   totalPages: number;
+}
+
+// Pure state-update helpers (exported for testability)
+
+export function addItem(items: Item[], newItem: Item): Item[] {
+  if (items.some((i) => i.id === newItem.id)) return items;
+  return [...items, newItem];
+}
+
+export function updateItem(items: Item[], updated: Item): Item[] {
+  return items.map((i) => (i.id === updated.id ? updated : i));
+}
+
+export function removeItem(items: Item[], itemId: number): Item[] {
+  return items.filter((i) => i.id !== itemId);
+}
+
+export function updateColumnValue(
+  items: Item[],
+  itemId: number,
+  columnId: number,
+  value: ColumnValue
+): Item[] {
+  return items.map((item) => {
+    if (item.id !== itemId) return item;
+    const cvs = item.columnValues || [];
+    const idx = cvs.findIndex((cv) => cv.columnId === columnId);
+    const newCvs =
+      idx >= 0
+        ? cvs.map((cv) => (cv.columnId === columnId ? { ...cv, value: value.value ?? value } : cv))
+        : [...cvs, value];
+    return { ...item, columnValues: newCvs };
+  });
+}
+
+export function addGroup(board: Board, group: BoardGroup): Board {
+  if (board.groups.some((g) => g.id === group.id)) return board;
+  return { ...board, groups: [...board.groups, group] };
+}
+
+export function updateGroup(board: Board, updated: BoardGroup): Board {
+  return {
+    ...board,
+    groups: board.groups.map((g) => (g.id === updated.id ? { ...g, ...updated } : g)),
+  };
+}
+
+export function removeGroup(board: Board, groupId: number): Board {
+  return { ...board, groups: board.groups.filter((g) => g.id !== groupId) };
+}
+
+export function addColumn(board: Board, column: Column): Board {
+  if (board.columns.some((c) => c.id === column.id)) return board;
+  return { ...board, columns: [...board.columns, column] };
+}
+
+export function updateColumn(board: Board, updated: Column): Board {
+  return {
+    ...board,
+    columns: board.columns.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)),
+  };
+}
+
+export function removeColumn(board: Board, columnId: number): Board {
+  return { ...board, columns: board.columns.filter((c) => c.id !== columnId) };
 }
 
 export function useBoard(boardId: number): UseBoardReturn {
@@ -22,6 +89,48 @@ export function useBoard(boardId: number): UseBoardReturn {
   const [totalItems, setTotalItems] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+
+  // WebSocket with smart state diffing callbacks
+  const { isConnected } = useWebSocket(boardId, {
+    onItemCreated: (item: Item) => {
+      setItems((prev) => addItem(prev, item));
+      setTotalItems((prev) => prev + 1);
+    },
+    onItemUpdated: (item: Item) => {
+      setItems((prev) => updateItem(prev, item));
+    },
+    onItemDeleted: ({ itemId }: { itemId: number }) => {
+      setItems((prev) => removeItem(prev, itemId));
+      setTotalItems((prev) => Math.max(0, prev - 1));
+    },
+    onColumnValueChanged: (data: {
+      itemId: number;
+      columnId: number;
+      value: ColumnValue;
+    }) => {
+      setItems((prev) =>
+        updateColumnValue(prev, data.itemId, data.columnId, data.value)
+      );
+    },
+    onGroupCreated: (group: BoardGroup) => {
+      setBoard((prev) => (prev ? addGroup(prev, group) : prev));
+    },
+    onGroupUpdated: (group: BoardGroup) => {
+      setBoard((prev) => (prev ? updateGroup(prev, group) : prev));
+    },
+    onGroupDeleted: ({ id }: { id: number; boardId: number }) => {
+      setBoard((prev) => (prev ? removeGroup(prev, id) : prev));
+    },
+    onColumnCreated: (column: Column) => {
+      setBoard((prev) => (prev ? addColumn(prev, column) : prev));
+    },
+    onColumnUpdated: (column: Column) => {
+      setBoard((prev) => (prev ? updateColumn(prev, column) : prev));
+    },
+    onColumnDeleted: ({ id }: { id: number; boardId: number }) => {
+      setBoard((prev) => (prev ? removeColumn(prev, id) : prev));
+    },
+  });
 
   const refreshBoard = useCallback(async () => {
     try {
@@ -116,6 +225,7 @@ export function useBoard(boardId: number): UseBoardReturn {
     items,
     loading,
     error,
+    isConnected,
     refreshBoard,
     refreshItems,
     totalItems,

@@ -2,6 +2,7 @@ import { Transaction } from 'sequelize';
 import { sequelize, ColumnValue, Column, Item, ActivityLog } from '../models';
 import { AuthUser } from '../types';
 import { getHandler, AggregateResult } from '../eav';
+import wsService from './WebSocketService';
 
 export default class ColumnValueService {
   /**
@@ -85,7 +86,7 @@ export default class ColumnValueService {
       await transaction.commit();
 
       // Reload with column association
-      return (await ColumnValue.findByPk(columnValue.id, {
+      const result = (await ColumnValue.findByPk(columnValue.id, {
         include: [
           {
             model: Column,
@@ -94,6 +95,19 @@ export default class ColumnValueService {
           },
         ],
       }))!;
+
+      // Broadcast change to board room
+      const item = await Item.findByPk(itemId);
+      if (item) {
+        wsService.emitToBoard((item as any).boardId, 'column_value:changed', {
+          itemId,
+          columnId,
+          value: result.value,
+          columnValue: result,
+        });
+      }
+
+      return result;
     } catch (error) {
       await transaction.rollback();
       throw error;
@@ -159,7 +173,7 @@ export default class ColumnValueService {
 
       await transaction.commit();
 
-      return ColumnValue.findAll({
+      const results = await ColumnValue.findAll({
         where: { itemId },
         include: [
           {
@@ -169,6 +183,18 @@ export default class ColumnValueService {
           },
         ],
       });
+
+      // Broadcast batch change to board room
+      const item = await Item.findByPk(itemId);
+      if (item) {
+        wsService.emitToBoard((item as any).boardId, 'column_values:batch_changed', {
+          itemId,
+          boardId: (item as any).boardId,
+          values: results,
+        });
+      }
+
+      return results;
     } catch (error) {
       await transaction.rollback();
       throw error;

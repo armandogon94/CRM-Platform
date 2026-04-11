@@ -8,6 +8,7 @@ import {
   ActivityLog,
 } from '../models';
 import { AuthUser } from '../types';
+import wsService from './WebSocketService';
 
 interface ItemFilters {
   groupId?: number;
@@ -169,7 +170,9 @@ export default class ItemService {
 
       await transaction.commit();
 
-      return (await ItemService.getById(item.id, boardId))!;
+      const fullItem = (await ItemService.getById(item.id, boardId))!;
+      wsService.emitToBoard(boardId, 'item:created', fullItem);
+      return fullItem;
     } catch (error) {
       await transaction.rollback();
       throw error;
@@ -223,7 +226,10 @@ export default class ItemService {
       );
 
       await transaction.commit();
-      return (await ItemService.getById(id, boardId))!;
+
+      const fullItem = (await ItemService.getById(id, boardId))!;
+      wsService.emitToBoard(boardId, 'item:updated', fullItem);
+      return fullItem;
     } catch (error) {
       await transaction.rollback();
       throw error;
@@ -266,6 +272,7 @@ export default class ItemService {
       );
 
       await transaction.commit();
+      wsService.emitToBoard(boardId, 'item:deleted', { id, boardId });
     } catch (error) {
       await transaction.rollback();
       throw error;
@@ -326,7 +333,10 @@ export default class ItemService {
       );
 
       await transaction.commit();
-      return (await ItemService.getById(id, boardId))!;
+
+      const fullItem = (await ItemService.getById(id, boardId))!;
+      wsService.emitToBoard(boardId, 'item:updated', fullItem);
+      return fullItem;
     } catch (error) {
       await transaction.rollback();
       throw error;
@@ -365,6 +375,7 @@ export default class ItemService {
       );
 
       await transaction.commit();
+      wsService.emitToBoard(boardId, 'items:reordered', { boardId, itemIds });
     } catch (error) {
       await transaction.rollback();
       throw error;

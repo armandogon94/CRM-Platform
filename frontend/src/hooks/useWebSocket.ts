@@ -11,6 +11,12 @@ interface WebSocketCallbacks {
     columnId: number;
     value: ColumnValue;
   }) => void;
+  onGroupCreated?: (group: any) => void;
+  onGroupUpdated?: (group: any) => void;
+  onGroupDeleted?: (data: { id: number; boardId: number }) => void;
+  onColumnCreated?: (column: any) => void;
+  onColumnUpdated?: (column: any) => void;
+  onColumnDeleted?: (data: { id: number; boardId: number }) => void;
 }
 
 interface UseWebSocketReturn {
@@ -73,6 +79,30 @@ export function useWebSocket(
         callbacksRef.current?.onColumnValueChanged?.(data);
       }
     );
+
+    socket.on('group:created', (group: any) => {
+      callbacksRef.current?.onGroupCreated?.(group);
+    });
+
+    socket.on('group:updated', (group: any) => {
+      callbacksRef.current?.onGroupUpdated?.(group);
+    });
+
+    socket.on('group:deleted', (data: { id: number; boardId: number }) => {
+      callbacksRef.current?.onGroupDeleted?.(data);
+    });
+
+    socket.on('column:created', (column: any) => {
+      callbacksRef.current?.onColumnCreated?.(column);
+    });
+
+    socket.on('column:updated', (column: any) => {
+      callbacksRef.current?.onColumnUpdated?.(column);
+    });
+
+    socket.on('column:deleted', (data: { id: number; boardId: number }) => {
+      callbacksRef.current?.onColumnDeleted?.(data);
+    });
 
     return () => {
       if (boardId) {
