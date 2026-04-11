@@ -1,4 +1,4 @@
-import { Op, Transaction, WhereOptions } from 'sequelize';
+import { Op, Transaction, WhereOptions, literal } from 'sequelize';
 import {
   sequelize,
   Item,
@@ -10,6 +10,12 @@ import {
 import { AuthUser } from '../types';
 import wsService from './WebSocketService';
 
+export interface ColumnFilter {
+  columnId: number;
+  operator: string;
+  value: any;
+}
+
 interface ItemFilters {
   groupId?: number;
   search?: string;
@@ -17,6 +23,66 @@ interface ItemFilters {
   sortOrder?: 'ASC' | 'DESC';
   page?: number;
   limit?: number;
+  columnFilters?: ColumnFilter[];
+  sortByColumn?: number;
+}
+
+/**
+ * Build a Sequelize literal WHERE clause for a single column-value filter.
+ * ColumnValue.value is JSONB. For text comparisons we cast to text.
+ * Returns a raw SQL fragment used inside an EXISTS subquery.
+ */
+function buildColumnValueCondition(filter: ColumnFilter): string {
+  const { columnId, operator, value } = filter;
+  const safeColumnId = Number(columnId);
+  // Escape single quotes in string values for SQL safety
+  const safeValue = typeof value === 'string' ? value.replace(/'/g, "''") : value;
+
+  switch (operator) {
+    case 'equals':
+      if (typeof value === 'number' || typeof value === 'boolean') {
+        return `cv."columnId" = ${safeColumnId} AND cv.value = '${JSON.stringify(value)}'::jsonb`;
+      }
+      return `cv."columnId" = ${safeColumnId} AND cv.value #>> '{}' = '${safeValue}'`;
+
+    case 'not_equals':
+      if (typeof value === 'number' || typeof value === 'boolean') {
+        return `cv."columnId" = ${safeColumnId} AND cv.value != '${JSON.stringify(value)}'::jsonb`;
+      }
+      return `cv."columnId" = ${safeColumnId} AND cv.value #>> '{}' != '${safeValue}'`;
+
+    case 'contains':
+      return `cv."columnId" = ${safeColumnId} AND cv.value #>> '{}' ILIKE '%${safeValue}%'`;
+
+    case 'not_contains':
+      return `cv."columnId" = ${safeColumnId} AND cv.value #>> '{}' NOT ILIKE '%${safeValue}%'`;
+
+    case 'starts_with':
+      return `cv."columnId" = ${safeColumnId} AND cv.value #>> '{}' ILIKE '${safeValue}%'`;
+
+    case 'greater_than':
+      return `cv."columnId" = ${safeColumnId} AND (cv.value #>> '{}')::numeric > ${Number(value)}`;
+
+    case 'less_than':
+      return `cv."columnId" = ${safeColumnId} AND (cv.value #>> '{}')::numeric < ${Number(value)}`;
+
+    case 'greater_or_equal':
+      return `cv."columnId" = ${safeColumnId} AND (cv.value #>> '{}')::numeric >= ${Number(value)}`;
+
+    case 'less_or_equal':
+      return `cv."columnId" = ${safeColumnId} AND (cv.value #>> '{}')::numeric <= ${Number(value)}`;
+
+    case 'is_empty':
+      // Item has no column_value row for this column, or the value is null/empty string
+      return `NOT EXISTS (SELECT 1 FROM column_values cv2 WHERE cv2."itemId" = "Item"."id" AND cv2."columnId" = ${safeColumnId} AND cv2.value IS NOT NULL AND cv2.value::text != 'null' AND cv2.value #>> '{}' != '')`;
+
+    case 'is_not_empty':
+      return `EXISTS (SELECT 1 FROM column_values cv2 WHERE cv2."itemId" = "Item"."id" AND cv2."columnId" = ${safeColumnId} AND cv2.value IS NOT NULL AND cv2.value::text != 'null' AND cv2.value #>> '{}' != '')`;
+
+    default:
+      // Fall back to equals
+      return `cv."columnId" = ${safeColumnId} AND cv.value #>> '{}' = '${safeValue}'`;
+  }
 }
 
 export default class ItemService {
@@ -42,6 +108,46 @@ export default class ItemService {
       (where as any).name = { [Op.iLike]: `%${filters.search}%` };
     }
 
+    // Column-value filters: each filter becomes an EXISTS subquery against column_values
+    if (filters.columnFilters && filters.columnFilters.length > 0) {
+      const filterClauses: any[] = [];
+      for (const cf of filters.columnFilters) {
+        if (cf.operator === 'is_empty' || cf.operator === 'is_not_empty') {
+          // These operators have their own standalone subquery
+          filterClauses.push(
+            literal(buildColumnValueCondition(cf))
+          );
+        } else {
+          filterClauses.push(
+            literal(
+              `EXISTS (SELECT 1 FROM column_values cv WHERE cv."itemId" = "Item"."id" AND ${buildColumnValueCondition(cf)})`
+            )
+          );
+        }
+      }
+      (where as any)[Op.and] = [
+        ...((where as any)[Op.and] || []),
+        ...filterClauses,
+      ];
+    }
+
+    // Determine ORDER clause
+    let order: any[];
+    if (filters.sortByColumn) {
+      // Sort by a column value: use a subquery to extract the value
+      const colId = Number(filters.sortByColumn);
+      order = [
+        [
+          literal(
+            `(SELECT cv.value #>> '{}' FROM column_values cv WHERE cv."itemId" = "Item"."id" AND cv."columnId" = ${colId} LIMIT 1)`
+          ),
+          sortOrder,
+        ],
+      ];
+    } else {
+      order = [[sortBy, sortOrder]];
+    }
+
     const { count, rows } = await Item.findAndCountAll({
       where,
       include: [
@@ -62,9 +168,10 @@ export default class ItemService {
           attributes: ['id', 'name', 'color'],
         },
       ],
-      order: [[sortBy, sortOrder]],
+      order,
       limit,
       offset,
+      subQuery: false,
     });
 
     return { items: rows, total: count };

@@ -17,6 +17,24 @@ router.get('/', async (req: AuthRequest, res: Response) => {
     const search = req.query.search as string | undefined;
     const sortBy = req.query.sortBy as string | undefined;
     const sortOrder = (req.query.sortOrder as 'ASC' | 'DESC') || undefined;
+    const sortByColumn = req.query.sortByColumn
+      ? parseInt(req.query.sortByColumn as string, 10)
+      : undefined;
+
+    // Decode base64-encoded column filters
+    let columnFilters: Array<{ columnId: number; operator: string; value: any }> | undefined;
+    if (req.query.columnFilters) {
+      try {
+        const decoded = Buffer.from(req.query.columnFilters as string, 'base64').toString('utf-8');
+        const parsed = JSON.parse(decoded);
+        if (!Array.isArray(parsed)) {
+          return errorResponse(res, 'Invalid columnFilters: must be a JSON array', 400);
+        }
+        columnFilters = parsed;
+      } catch {
+        return errorResponse(res, 'Invalid columnFilters: must be base64-encoded JSON array', 400);
+      }
+    }
 
     const { items, total } = await ItemService.list(boardId, {
       page,
@@ -25,6 +43,8 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       search,
       sortBy,
       sortOrder,
+      sortByColumn,
+      columnFilters,
     });
 
     return paginatedResponse(res, items, { page, limit, total }, 'Items retrieved');
