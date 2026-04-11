@@ -5,6 +5,7 @@ import { useBoard } from '@/hooks/useBoard';
 import { FilterPanel, type FilterItem } from '@/components/common/FilterPanel';
 import { SortPanel, type SortRule } from '@/components/common/SortPanel';
 import { ColumnTypePickerModal } from '@/components/board/ColumnTypePickerModal';
+import { ColorPicker } from '@/components/board/ColorPicker';
 import api from '@/utils/api';
 import {
   Table,
@@ -370,6 +371,11 @@ function TableView({
   const [editingName, setEditingName] = useState('');
   const contextMenuRef = useRef<HTMLDivElement>(null);
 
+  // Group management state
+  const [editingGroupId, setEditingGroupId] = useState<number | null>(null);
+  const [editingGroupName, setEditingGroupName] = useState('');
+  const [colorPickerGroupId, setColorPickerGroupId] = useState<number | null>(null);
+
   // Close context menu on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -403,6 +409,52 @@ function TableView({
     if (typeof cv.value === 'object') return JSON.stringify(cv.value);
     return String(cv.value);
   };
+
+  // Group handlers
+  function handleStartGroupRename(groupId: number) {
+    const group = groups.find((g) => g.id === groupId);
+    if (!group) return;
+    setEditingGroupId(groupId);
+    setEditingGroupName(group.name);
+  }
+
+  async function handleFinishGroupRename() {
+    if (editingGroupId === null || !editingGroupName.trim()) {
+      setEditingGroupId(null);
+      return;
+    }
+    await api.put(
+      `/workspaces/${board.workspaceId}/boards/${board.id}/groups/${editingGroupId}`,
+      { name: editingGroupName.trim() }
+    );
+    setEditingGroupId(null);
+    onRefreshBoard();
+  }
+
+  async function handleGroupColorChange(groupId: number, color: string) {
+    setColorPickerGroupId(null);
+    await api.put(
+      `/workspaces/${board.workspaceId}/boards/${board.id}/groups/${groupId}`,
+      { color }
+    );
+    onRefreshBoard();
+  }
+
+  async function handleDeleteGroup(groupId: number) {
+    if (!window.confirm('Delete this group? Items will be moved to another group.')) return;
+    await api.delete(
+      `/workspaces/${board.workspaceId}/boards/${board.id}/groups/${groupId}`
+    );
+    onRefreshBoard();
+  }
+
+  async function handleAddGroup() {
+    await api.post(
+      `/workspaces/${board.workspaceId}/boards/${board.id}/groups`,
+      { name: 'New Group' }
+    );
+    onRefreshBoard();
+  }
 
   async function handleAddColumn(columnType: string) {
     setShowColumnTypePicker(false);
@@ -457,28 +509,60 @@ function TableView({
         return (
           <div key={group.id} className="bg-white rounded-lg border border-gray-200 overflow-hidden">
             {/* Group Header */}
-            <button
-              onClick={() => toggleGroup(group.id)}
-              className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-gray-50 transition-colors"
-            >
-              <ChevronDown
-                size={16}
-                className={clsx(
-                  'text-gray-400 transition-transform',
-                  isCollapsed && '-rotate-90'
-                )}
-              />
-              <div
-                className="w-3 h-3 rounded-sm"
+            <div className="flex items-center gap-2 px-4 py-2.5 hover:bg-gray-50 transition-colors group/header">
+              <button onClick={() => toggleGroup(group.id)} className="text-gray-400">
+                <ChevronDown
+                  size={16}
+                  className={clsx('transition-transform', isCollapsed && '-rotate-90')}
+                />
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setColorPickerGroupId(colorPickerGroupId === group.id ? null : group.id); }}
+                className="w-3 h-3 rounded-sm flex-shrink-0 hover:ring-2 hover:ring-offset-1 hover:ring-gray-300 transition-all"
                 style={{ backgroundColor: group.color || '#6366f1' }}
+                title="Change color"
               />
-              <span className="font-semibold text-sm text-gray-900">
-                {group.name}
-              </span>
+              {editingGroupId === group.id ? (
+                <input
+                  autoFocus
+                  value={editingGroupName}
+                  onChange={(e) => setEditingGroupName(e.target.value)}
+                  onBlur={handleFinishGroupRename}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleFinishGroupRename();
+                    if (e.key === 'Escape') setEditingGroupId(null);
+                  }}
+                  className="border border-blue-400 rounded px-1 py-0.5 text-sm font-semibold text-gray-900 outline-none"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <span
+                  className="font-semibold text-sm text-gray-900 cursor-pointer hover:underline"
+                  onClick={() => handleStartGroupRename(group.id)}
+                >
+                  {group.name}
+                </span>
+              )}
               <span className="text-xs text-gray-400 ml-1">
                 {groupItems.length} item{groupItems.length !== 1 ? 's' : ''}
               </span>
-            </button>
+              <button
+                onClick={() => handleDeleteGroup(group.id)}
+                className="ml-auto text-gray-300 hover:text-red-500 opacity-0 group-hover/header:opacity-100 transition-all"
+                title="Delete group"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+            {/* Color Picker Dropdown */}
+            {colorPickerGroupId === group.id && (
+              <div className="mx-4 mb-2">
+                <ColorPicker
+                  selectedColor={group.color || '#6366f1'}
+                  onChange={(color) => handleGroupColorChange(group.id, color)}
+                />
+              </div>
+            )}
 
             {/* Table */}
             {!isCollapsed && (
@@ -571,6 +655,15 @@ function TableView({
           </div>
         );
       })}
+
+      {/* Add Group Button */}
+      <button
+        onClick={handleAddGroup}
+        className="flex items-center gap-2 px-4 py-3 text-sm text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg border border-dashed border-gray-300 hover:border-blue-300 transition-colors w-full"
+      >
+        <Plus size={16} />
+        Add group
+      </button>
 
       {groups.length === 0 && (
         <div className="text-center py-12 text-gray-400">

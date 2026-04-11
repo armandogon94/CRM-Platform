@@ -20,10 +20,10 @@
 - [x] Task 3.3: Column header context menu + add column button (M)
 - [x] **Checkpoint: Slice 3** — 108 backend + 21 frontend tests passing
 
-## Slice 4: Group Management UI
-- [ ] Task 4.1: Integration tests for existing group routes (S)
-- [ ] Task 4.2: GroupHeader component with inline editing (M)
-- [ ] **Checkpoint: Slice 4** — rename, color, collapse, add, delete group
+## Slice 4: Group Management UI ✅
+- [x] Task 4.1: Integration tests for existing group routes (S)
+- [x] Task 4.2: GroupHeader with inline editing, color picker, collapse (M)
+- [x] **Checkpoint: Slice 4** — 115 backend + 21 frontend tests passing
 
 ## Slice 5: Drag-and-Drop
 - [ ] Task 5.1: DnD for items within/between groups (TableView) (M)
