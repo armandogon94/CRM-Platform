@@ -1,8 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useBoard } from '@/hooks/useBoard';
-import { useWebSocket } from '@/hooks/useWebSocket';
+import { FilterPanel, type FilterItem } from '@/components/common/FilterPanel';
+import { SortPanel, type SortRule } from '@/components/common/SortPanel';
+import api from '@/utils/api';
 import {
   Table,
   LayoutGrid,
@@ -15,6 +17,7 @@ import {
   Plus,
   ChevronDown,
   AlertCircle,
+  Save,
 } from 'lucide-react';
 import clsx from 'clsx';
 import type { BoardView, Item, Column } from '@/types';
@@ -50,14 +53,78 @@ export default function BoardPage() {
   const [activeView, setActiveView] = useState<ViewType>('table');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // WebSocket for real-time updates
-  useWebSocket(boardId, {
-    onItemCreated: () => refreshItems(),
-    onItemUpdated: () => refreshItems(),
-    onItemDeleted: () => refreshItems(),
-    onColumnValueChanged: () => refreshItems(),
-  });
+  // Filter/Sort state
+  const [filters, setFilters] = useState<FilterItem[]>([]);
+  const [sorts, setSorts] = useState<SortRule[]>([]);
+  const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const [showSortPanel, setShowSortPanel] = useState(false);
 
+  // Find the active view for saving/loading presets
+  const activeViewRecord = board?.views?.find(
+    (v) => v.viewType === activeView
+  ) ?? board?.views?.[0];
+
+  // Load saved filters/sorts from view settings on mount
+  useEffect(() => {
+    if (!activeViewRecord?.settings) return;
+    const saved = activeViewRecord.settings as {
+      savedFilters?: FilterItem[];
+      savedSorts?: SortRule[];
+    };
+    if (saved.savedFilters && saved.savedFilters.length > 0) {
+      setFilters(saved.savedFilters);
+    }
+    if (saved.savedSorts && saved.savedSorts.length > 0) {
+      setSorts(saved.savedSorts);
+    }
+  }, [activeViewRecord?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Save current filters/sorts to view settings
+  const handleSavePreset = useCallback(async () => {
+    if (!activeViewRecord || !board) return;
+    const workspaceId = board.workspaceId;
+    await api.put(
+      `/workspaces/${workspaceId}/boards/${board.id}/views/${activeViewRecord.id}`,
+      {
+        settings: {
+          ...activeViewRecord.settings,
+          savedFilters: filters,
+          savedSorts: sorts,
+        },
+      }
+    );
+  }, [activeViewRecord, board, filters, sorts]);
+
+  // When filters or sorts change, re-fetch items from server
+  const handleFiltersChange = useCallback(
+    (newFilters: FilterItem[]) => {
+      setFilters(newFilters);
+      const sortByColumn = sorts.length > 0 ? sorts[0].columnId : undefined;
+      const sortOrder = sorts.length > 0 ? sorts[0].direction : undefined;
+      refreshItems({
+        columnFilters: newFilters.length > 0 ? newFilters : undefined,
+        sortByColumn,
+        sortOrder,
+      });
+    },
+    [refreshItems, sorts]
+  );
+
+  const handleSortsChange = useCallback(
+    (newSorts: SortRule[]) => {
+      setSorts(newSorts);
+      const sortByColumn = newSorts.length > 0 ? newSorts[0].columnId : undefined;
+      const sortOrder = newSorts.length > 0 ? newSorts[0].direction : undefined;
+      refreshItems({
+        columnFilters: filters.length > 0 ? filters : undefined,
+        sortByColumn,
+        sortOrder,
+      });
+    },
+    [refreshItems, filters]
+  );
+
+  // Client-side text search on top of server-filtered items
   const filteredItems = useMemo(() => {
     if (!searchQuery.trim()) return items;
     const query = searchQuery.toLowerCase();
@@ -173,26 +240,83 @@ export default function BoardPage() {
               />
             </div>
 
-            <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+            <button
+              onClick={() => setShowFilterPanel(!showFilterPanel)}
+              className={clsx(
+                'flex items-center gap-1.5 px-3 py-1.5 text-sm border rounded-lg transition-colors relative',
+                filters.length > 0
+                  ? 'text-blue-700 border-blue-300 bg-blue-50 hover:bg-blue-100'
+                  : 'text-gray-600 border-gray-300 hover:bg-gray-50'
+              )}
+            >
               <Filter size={14} />
               Filter
+              {filters.length > 0 && (
+                <span className="ml-1 bg-blue-600 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                  {filters.length}
+                </span>
+              )}
             </button>
 
-            <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+            <button
+              onClick={() => setShowSortPanel(!showSortPanel)}
+              className={clsx(
+                'flex items-center gap-1.5 px-3 py-1.5 text-sm border rounded-lg transition-colors',
+                sorts.length > 0
+                  ? 'text-blue-700 border-blue-300 bg-blue-50 hover:bg-blue-100'
+                  : 'text-gray-600 border-gray-300 hover:bg-gray-50'
+              )}
+            >
               <SortAsc size={14} />
               Sort
+              {sorts.length > 0 && (
+                <span className="ml-1 bg-blue-600 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                  {sorts.length}
+                </span>
+              )}
             </button>
 
             <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
               <Users size={14} />
               Person
             </button>
+
+            {(filters.length > 0 || sorts.length > 0) && activeViewRecord && (
+              <button
+                onClick={handleSavePreset}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-green-700 border border-green-300 bg-green-50 rounded-lg hover:bg-green-100 transition-colors"
+              >
+                <Save size={14} />
+                Save preset
+              </button>
+            )}
           </div>
 
           <div className="text-xs text-gray-400">
             {filteredItems.length} item{filteredItems.length !== 1 ? 's' : ''}
           </div>
         </div>
+
+        {/* Filter/Sort Panels */}
+        {showFilterPanel && (
+          <div className="px-6 py-3 bg-gray-50 border-b border-gray-100">
+            <FilterPanel
+              columns={board.columns || []}
+              filters={filters}
+              onChange={handleFiltersChange}
+            />
+          </div>
+        )}
+
+        {showSortPanel && (
+          <div className="px-6 py-3 bg-gray-50 border-b border-gray-100">
+            <SortPanel
+              columns={board.columns || []}
+              sorts={sorts}
+              onChange={handleSortsChange}
+            />
+          </div>
+        )}
 
         {/* Board Content - Table View */}
         <div className="flex-1 overflow-auto p-6">

@@ -7,12 +7,12 @@
 - [x] Task 1.4: Update useBoard to handle WS events with state diffing + Vitest setup (M)
 - [x] **Checkpoint: Slice 1** — 82 backend tests + 17 frontend tests, all passing
 
-## Slice 2: Filter/Sort Functionality
-- [ ] Task 2.1: Extend ItemService.list() with filter support (M)
-- [ ] Task 2.2: Expose filter/sort params on item routes (S)
-- [ ] Task 2.3: Wire FilterPanel + SortPanel into BoardPage + fix dead code (M)
-- [ ] Task 2.4: Save/load filter presets in BoardView settings (S)
-- [ ] **Checkpoint: Slice 2** — filter by status, sort by number, save preset
+## Slice 2: Filter/Sort Functionality ✅
+- [x] Task 2.1: Extend ItemService.list() with filter support (M)
+- [x] Task 2.2: Expose filter/sort params on item routes (S)
+- [x] Task 2.3: Wire FilterPanel + SortPanel into BoardPage + fix dead code (M)
+- [x] Task 2.4: Save/load filter presets in BoardView settings (S)
+- [x] **Checkpoint: Slice 2** — 100 backend + 17 frontend tests passing
 
 ## Slice 3: Column Management UI
 - [ ] Task 3.1: Integration tests for existing column routes (S)

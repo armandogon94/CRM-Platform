@@ -1,7 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { Board, Item, BoardGroup, Column, ColumnValue } from '@/types';
+import type { FilterItem } from '@/components/common/FilterPanel';
+import type { SortRule } from '@/components/common/SortPanel';
 import { useWebSocket } from './useWebSocket';
 import api from '@/utils/api';
+
+interface RefreshItemsOptions {
+  page?: number;
+  limit?: number;
+  columnFilters?: FilterItem[];
+  sortByColumn?: number;
+  sortOrder?: 'ASC' | 'DESC';
+}
 
 interface UseBoardReturn {
   board: Board | null;
@@ -10,7 +20,7 @@ interface UseBoardReturn {
   error: string | null;
   isConnected: boolean;
   refreshBoard: () => Promise<void>;
-  refreshItems: (page?: number, limit?: number) => Promise<void>;
+  refreshItems: (options?: RefreshItemsOptions) => Promise<void>;
   totalItems: number;
   currentPage: number;
   totalPages: number;
@@ -147,11 +157,21 @@ export function useBoard(boardId: number): UseBoardReturn {
   }, [boardId]);
 
   const refreshItems = useCallback(
-    async (page: number = 1, limit: number = 50) => {
+    async (options: RefreshItemsOptions = {}) => {
+      const { page = 1, limit = 50, columnFilters, sortByColumn, sortOrder } = options;
       try {
-        const res = await api.get<{ items: Item[] }>(
-          `/boards/${boardId}/items?page=${page}&limit=${limit}`
-        );
+        let url = `/boards/${boardId}/items?page=${page}&limit=${limit}`;
+        if (columnFilters && columnFilters.length > 0) {
+          const encoded = btoa(JSON.stringify(columnFilters));
+          url += `&columnFilters=${encoded}`;
+        }
+        if (sortByColumn) {
+          url += `&sortByColumn=${sortByColumn}`;
+        }
+        if (sortOrder) {
+          url += `&sortOrder=${sortOrder}`;
+        }
+        const res = await api.get<{ items: Item[] }>(url);
         if (res.success && res.data) {
           const itemList = res.data.items || (res.data as any) || [];
           setItems(itemList);
