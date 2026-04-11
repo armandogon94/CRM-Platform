@@ -14,11 +14,11 @@
 - [x] Task 2.4: Save/load filter presets in BoardView settings (S)
 - [x] **Checkpoint: Slice 2** — 100 backend + 17 frontend tests passing
 
-## Slice 3: Column Management UI
-- [ ] Task 3.1: Integration tests for existing column routes (S)
-- [ ] Task 3.2: ColumnTypePickerModal component (S)
-- [ ] Task 3.3: Column header context menu + add column button (M)
-- [ ] **Checkpoint: Slice 3** — add column, rename, delete
+## Slice 3: Column Management UI ✅
+- [x] Task 3.1: Integration tests for existing column routes (S)
+- [x] Task 3.2: ColumnTypePickerModal component (S)
+- [x] Task 3.3: Column header context menu + add column button (M)
+- [x] **Checkpoint: Slice 3** — 108 backend + 21 frontend tests passing
 
 ## Slice 4: Group Management UI
 - [ ] Task 4.1: Integration tests for existing group routes (S)

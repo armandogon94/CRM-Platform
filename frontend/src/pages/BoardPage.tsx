@@ -1,9 +1,10 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { useBoard } from '@/hooks/useBoard';
 import { FilterPanel, type FilterItem } from '@/components/common/FilterPanel';
 import { SortPanel, type SortRule } from '@/components/common/SortPanel';
+import { ColumnTypePickerModal } from '@/components/board/ColumnTypePickerModal';
 import api from '@/utils/api';
 import {
   Table,
@@ -18,6 +19,8 @@ import {
   ChevronDown,
   AlertCircle,
   Save,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 import clsx from 'clsx';
 import type { BoardView, Item, Column } from '@/types';
@@ -49,7 +52,7 @@ const VIEW_LABELS: Record<ViewType, string> = {
 export default function BoardPage() {
   const { id } = useParams<{ id: string }>();
   const boardId = Number(id);
-  const { board, items, loading, error, refreshItems } = useBoard(boardId);
+  const { board, items, loading, error, refreshItems, refreshBoard } = useBoard(boardId);
   const [activeView, setActiveView] = useState<ViewType>('table');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -326,6 +329,7 @@ export default function BoardPage() {
               groups={board.groups || []}
               columns={board.columns || []}
               groupedItems={groupedItems}
+              onRefreshBoard={refreshBoard}
             />
           ) : (
             <div className="flex items-center justify-center h-64 text-gray-400">
@@ -343,21 +347,41 @@ export default function BoardPage() {
   );
 }
 
-// Inline TableView component
+// Inline TableView component with column management
 function TableView({
   board,
   groups,
   columns,
   groupedItems,
+  onRefreshBoard,
 }: {
-  board: { id: number; name: string };
+  board: { id: number; name: string; workspaceId: number };
   groups: { id: number; name: string; color: string; isCollapsed: boolean }[];
   columns: Column[];
   groupedItems: Record<number, Item[]>;
+  onRefreshBoard: () => void;
 }) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<number>>(
     new Set(groups.filter((g) => g.isCollapsed).map((g) => g.id))
   );
+  const [showColumnTypePicker, setShowColumnTypePicker] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ colId: number; x: number; y: number } | null>(null);
+  const [editingColumnId, setEditingColumnId] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close context menu on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    }
+    if (contextMenu) {
+      document.addEventListener('mousedown', handleClick);
+      return () => document.removeEventListener('mousedown', handleClick);
+    }
+  }, [contextMenu]);
 
   const toggleGroup = (groupId: number) => {
     setCollapsedGroups((prev) => {
@@ -379,6 +403,50 @@ function TableView({
     if (typeof cv.value === 'object') return JSON.stringify(cv.value);
     return String(cv.value);
   };
+
+  async function handleAddColumn(columnType: string) {
+    setShowColumnTypePicker(false);
+    await api.post(
+      `/workspaces/${board.workspaceId}/boards/${board.id}/columns`,
+      { name: columnType.charAt(0).toUpperCase() + columnType.slice(1).replace('_', ' '), columnType }
+    );
+    onRefreshBoard();
+  }
+
+  function handleColumnContextMenu(e: React.MouseEvent, colId: number) {
+    e.preventDefault();
+    setContextMenu({ colId, x: e.clientX, y: e.clientY });
+  }
+
+  function handleStartRename(colId: number) {
+    const col = columns.find((c) => c.id === colId);
+    if (!col) return;
+    setEditingColumnId(colId);
+    setEditingName(col.name);
+    setContextMenu(null);
+  }
+
+  async function handleFinishRename() {
+    if (editingColumnId === null || !editingName.trim()) {
+      setEditingColumnId(null);
+      return;
+    }
+    await api.put(
+      `/workspaces/${board.workspaceId}/boards/${board.id}/columns/${editingColumnId}`,
+      { name: editingName.trim() }
+    );
+    setEditingColumnId(null);
+    onRefreshBoard();
+  }
+
+  async function handleDeleteColumn(colId: number) {
+    setContextMenu(null);
+    if (!window.confirm('Delete this column? All values in this column will be lost.')) return;
+    await api.delete(
+      `/workspaces/${board.workspaceId}/boards/${board.id}/columns/${colId}`
+    );
+    onRefreshBoard();
+  }
 
   return (
     <div className="space-y-4">
@@ -427,19 +495,44 @@ function TableView({
                       {sortedColumns.map((col) => (
                         <th
                           key={col.id}
-                          className="text-left font-medium text-gray-500 px-4 py-2 bg-gray-50"
+                          className="text-left font-medium text-gray-500 px-4 py-2 bg-gray-50 cursor-context-menu select-none"
                           style={{ minWidth: col.width || 150 }}
+                          onContextMenu={(e) => handleColumnContextMenu(e, col.id)}
                         >
-                          {col.name}
+                          {editingColumnId === col.id ? (
+                            <input
+                              autoFocus
+                              value={editingName}
+                              onChange={(e) => setEditingName(e.target.value)}
+                              onBlur={handleFinishRename}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleFinishRename();
+                                if (e.key === 'Escape') setEditingColumnId(null);
+                              }}
+                              className="border border-blue-400 rounded px-1 py-0.5 text-sm font-medium text-gray-900 outline-none w-full"
+                            />
+                          ) : (
+                            col.name
+                          )}
                         </th>
                       ))}
+                      {/* Add Column Button */}
+                      <th className="bg-gray-50 px-2 py-2 w-10">
+                        <button
+                          onClick={() => setShowColumnTypePicker(true)}
+                          className="text-gray-400 hover:text-blue-600 transition-colors"
+                          title="Add column"
+                        >
+                          <Plus size={16} />
+                        </button>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {groupItems.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={sortedColumns.length + 1}
+                          colSpan={sortedColumns.length + 2}
                           className="px-4 py-6 text-center text-gray-400 text-sm"
                         >
                           No items in this group
@@ -467,6 +560,7 @@ function TableView({
                               {getColumnValue(item, col.id)}
                             </td>
                           ))}
+                          <td />
                         </tr>
                       ))
                     )}
@@ -481,6 +575,38 @@ function TableView({
       {groups.length === 0 && (
         <div className="text-center py-12 text-gray-400">
           <p className="text-sm">No groups in this board yet</p>
+        </div>
+      )}
+
+      {/* Column Type Picker Modal */}
+      {showColumnTypePicker && (
+        <ColumnTypePickerModal
+          onSelect={handleAddColumn}
+          onClose={() => setShowColumnTypePicker(false)}
+        />
+      )}
+
+      {/* Column Context Menu */}
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          className="fixed bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50 min-w-[140px]"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            onClick={() => handleStartRename(contextMenu.colId)}
+            className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+          >
+            <Pencil size={14} />
+            Rename
+          </button>
+          <button
+            onClick={() => handleDeleteColumn(contextMenu.colId)}
+            className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+          >
+            <Trash2 size={14} />
+            Delete
+          </button>
         </div>
       )}
     </div>
