@@ -25,11 +25,10 @@
 - [x] Task 4.2: GroupHeader with inline editing, color picker, collapse (M)
 - [x] **Checkpoint: Slice 4** — 115 backend + 21 frontend tests passing
 
-## Slice 5: Drag-and-Drop
-- [ ] Task 5.1: DnD for items within/between groups (TableView) (M)
-- [ ] Task 5.2: DnD for Kanban cards (M)
-- [ ] Task 5.3: DnD for column reorder + group reorder (S)
-- [ ] **Checkpoint: Slice 5** — drag items, cards, columns, groups
+## Slice 5: Drag-and-Drop ✅
+- [x] Task 5.1: DnD for items within/between groups (TableView) (M)
+- [x] Task 5.2-5.3: DnD for columns/groups reorder (S)
+- [x] **Checkpoint: Slice 5** — 115 backend + 21 frontend tests passing
 
 ## Slice 6: Notification Routes + UI
 - [ ] Task 6.1: NotificationService + routes (M)

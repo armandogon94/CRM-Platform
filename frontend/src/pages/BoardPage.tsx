@@ -23,6 +23,8 @@ import {
   Pencil,
   Trash2,
 } from 'lucide-react';
+import { DragDropContext, Droppable, Draggable, type DropResult } from 'react-beautiful-dnd';
+import { GripVertical } from 'lucide-react';
 import clsx from 'clsx';
 import type { BoardView, Item, Column } from '@/types';
 
@@ -330,7 +332,9 @@ export default function BoardPage() {
               groups={board.groups || []}
               columns={board.columns || []}
               groupedItems={groupedItems}
+              items={filteredItems}
               onRefreshBoard={refreshBoard}
+              onRefreshItems={refreshItems}
             />
           ) : (
             <div className="flex items-center justify-center h-64 text-gray-400">
@@ -348,19 +352,23 @@ export default function BoardPage() {
   );
 }
 
-// Inline TableView component with column management
+// Inline TableView component with column management and DnD
 function TableView({
   board,
   groups,
   columns,
   groupedItems,
+  items: allItems,
   onRefreshBoard,
+  onRefreshItems,
 }: {
   board: { id: number; name: string; workspaceId: number };
   groups: { id: number; name: string; color: string; isCollapsed: boolean }[];
   columns: Column[];
   groupedItems: Record<number, Item[]>;
+  items: Item[];
   onRefreshBoard: () => void;
+  onRefreshItems: () => void;
 }) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<number>>(
     new Set(groups.filter((g) => g.isCollapsed).map((g) => g.id))
@@ -456,6 +464,38 @@ function TableView({
     onRefreshBoard();
   }
 
+  // DnD handler
+  async function handleDragEnd(result: DropResult) {
+    const { source, destination, draggableId, type } = result;
+    if (!destination) return;
+    if (source.droppableId === destination.droppableId && source.index === destination.index) return;
+
+    if (type === 'ITEM') {
+      const itemId = parseInt(draggableId.replace('item-', ''), 10);
+      const destGroupId = parseInt(destination.droppableId.replace('group-', ''), 10);
+      const sourceGroupId = parseInt(source.droppableId.replace('group-', ''), 10);
+
+      if (sourceGroupId !== destGroupId) {
+        // Move item to different group
+        await api.put(
+          `/workspaces/${board.workspaceId}/boards/${board.id}/items/${itemId}/move`,
+          { groupId: destGroupId }
+        );
+      } else {
+        // Reorder within same group
+        const groupItems = groupedItems[sourceGroupId] || [];
+        const reordered = [...groupItems];
+        const [moved] = reordered.splice(source.index, 1);
+        reordered.splice(destination.index, 0, moved);
+        await api.put(
+          `/workspaces/${board.workspaceId}/boards/${board.id}/items/reorder`,
+          { itemIds: reordered.map((i) => i.id) }
+        );
+      }
+      onRefreshItems();
+    }
+  }
+
   async function handleAddColumn(columnType: string) {
     setShowColumnTypePicker(false);
     await api.post(
@@ -501,6 +541,8 @@ function TableView({
   }
 
   return (
+    <>
+    <DragDropContext onDragEnd={handleDragEnd}>
     <div className="space-y-4">
       {groups.map((group) => {
         const isCollapsed = collapsedGroups.has(group.id);
@@ -612,7 +654,9 @@ function TableView({
                       </th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <Droppable droppableId={`group-${group.id}`} type="ITEM">
+                    {(provided, snapshot) => (
+                  <tbody ref={provided.innerRef} {...provided.droppableProps}>
                     {groupItems.length === 0 ? (
                       <tr>
                         <td
@@ -623,10 +667,16 @@ function TableView({
                         </td>
                       </tr>
                     ) : (
-                      groupItems.map((item) => (
+                      groupItems.map((item, index) => (
+                        <Draggable key={item.id} draggableId={`item-${item.id}`} index={index}>
+                          {(dragProvided, dragSnapshot) => (
                         <tr
-                          key={item.id}
-                          className="border-t border-gray-50 hover:bg-blue-50/30 transition-colors"
+                          ref={dragProvided.innerRef}
+                          {...dragProvided.draggableProps}
+                          className={clsx(
+                            'border-t border-gray-50 transition-colors',
+                            dragSnapshot.isDragging ? 'bg-blue-50 shadow-lg' : 'hover:bg-blue-50/30'
+                          )}
                         >
                           <td
                             className="px-4 py-2.5 font-medium text-gray-900"
@@ -634,7 +684,12 @@ function TableView({
                               borderLeft: `3px solid ${group.color || '#6366f1'}`,
                             }}
                           >
-                            {item.name}
+                            <div className="flex items-center gap-2">
+                              <span {...dragProvided.dragHandleProps} className="text-gray-300 hover:text-gray-500 cursor-grab">
+                                <GripVertical size={14} />
+                              </span>
+                              {item.name}
+                            </div>
                           </td>
                           {sortedColumns.map((col) => (
                             <td
@@ -646,9 +701,14 @@ function TableView({
                           ))}
                           <td />
                         </tr>
+                          )}
+                        </Draggable>
                       ))
                     )}
+                    {provided.placeholder}
                   </tbody>
+                    )}
+                  </Droppable>
                 </table>
               </div>
             )}
@@ -670,6 +730,8 @@ function TableView({
           <p className="text-sm">No groups in this board yet</p>
         </div>
       )}
+    </div>
+    </DragDropContext>
 
       {/* Column Type Picker Modal */}
       {showColumnTypePicker && (
@@ -702,6 +764,6 @@ function TableView({
           </button>
         </div>
       )}
-    </div>
+    </>
   );
 }
