@@ -15,6 +15,7 @@ import boardViewRouter from './boardViews';
 import automationRouter from './automations';
 import notificationRouter from './notifications';
 import fileRouter from './files';
+import activityLogRouter from './activityLogs';
 
 import Board from '../models/Board';
 import BoardGroup from '../models/BoardGroup';
@@ -36,6 +37,9 @@ router.use('/notifications', authenticate, notificationRouter);
 
 // ─── Files (authenticated) ─────────────────────────────────────────
 router.use('/files', authenticate, fileRouter);
+
+// ─── Activity Logs (authenticated) ────────────────────────────────
+router.use('/activity', authenticate, activityLogRouter);
 
 // ─── Workspace-nested routes ────────────────────────────────────────
 router.use('/workspaces', authenticate, workspaceRouter);

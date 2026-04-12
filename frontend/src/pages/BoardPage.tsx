@@ -22,11 +22,13 @@ import {
   Save,
   Pencil,
   Trash2,
+  Activity,
 } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, type DropResult } from 'react-beautiful-dnd';
 import { GripVertical } from 'lucide-react';
 import clsx from 'clsx';
 import type { BoardView, Item, Column } from '@/types';
+import { ActivityFeed } from '@/components/board/ActivityFeed';
 
 type ViewType = BoardView['viewType'];
 
@@ -64,6 +66,9 @@ export default function BoardPage() {
   const [sorts, setSorts] = useState<SortRule[]>([]);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [showSortPanel, setShowSortPanel] = useState(false);
+
+  // Activity panel state
+  const [showActivityPanel, setShowActivityPanel] = useState(false);
 
   // Find the active view for saving/loading presets
   const activeViewRecord = board?.views?.find(
@@ -287,6 +292,19 @@ export default function BoardPage() {
               Person
             </button>
 
+            <button
+              onClick={() => setShowActivityPanel(!showActivityPanel)}
+              className={clsx(
+                'flex items-center gap-1.5 px-3 py-1.5 text-sm border rounded-lg transition-colors',
+                showActivityPanel
+                  ? 'text-blue-700 border-blue-300 bg-blue-50 hover:bg-blue-100'
+                  : 'text-gray-600 border-gray-300 hover:bg-gray-50'
+              )}
+            >
+              <Activity size={14} />
+              Activity
+            </button>
+
             {(filters.length > 0 || sorts.length > 0) && activeViewRecord && (
               <button
                 onClick={handleSavePreset}
@@ -324,26 +342,44 @@ export default function BoardPage() {
           </div>
         )}
 
-        {/* Board Content - Table View */}
-        <div className="flex-1 overflow-auto p-6">
-          {activeView === 'table' ? (
-            <TableView
-              board={board}
-              groups={board.groups || []}
-              columns={board.columns || []}
-              groupedItems={groupedItems}
-              items={filteredItems}
-              onRefreshBoard={refreshBoard}
-              onRefreshItems={refreshItems}
-            />
-          ) : (
-            <div className="flex items-center justify-center h-64 text-gray-400">
-              <div className="text-center">
-                <LayoutGrid size={40} className="mx-auto mb-2 opacity-50" />
-                <p className="text-sm">
-                  {VIEW_LABELS[activeView]} view coming soon
-                </p>
+        {/* Board Content - Table View + Activity Panel */}
+        <div className="flex-1 flex overflow-hidden">
+          <div className="flex-1 overflow-auto p-6">
+            {activeView === 'table' ? (
+              <TableView
+                board={board}
+                groups={board.groups || []}
+                columns={board.columns || []}
+                groupedItems={groupedItems}
+                items={filteredItems}
+                onRefreshBoard={refreshBoard}
+                onRefreshItems={refreshItems}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-64 text-gray-400">
+                <div className="text-center">
+                  <LayoutGrid size={40} className="mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">
+                    {VIEW_LABELS[activeView]} view coming soon
+                  </p>
+                </div>
               </div>
+            )}
+          </div>
+
+          {/* Activity Side Panel */}
+          {showActivityPanel && (
+            <div className="w-80 border-l border-gray-200 bg-white overflow-y-auto flex-shrink-0">
+              <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-gray-900">Activity Log</h3>
+                <button
+                  onClick={() => setShowActivityPanel(false)}
+                  className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+                >
+                  &times;
+                </button>
+              </div>
+              <ActivityFeed boardId={boardId} />
             </div>
           )}
         </div>
