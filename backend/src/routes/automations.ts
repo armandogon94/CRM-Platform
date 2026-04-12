@@ -6,6 +6,7 @@ import { successResponse, errorResponse, paginatedResponse } from '../utils/resp
 import Board from '../models/Board';
 import Automation from '../models/Automation';
 import AutomationLog from '../models/AutomationLog';
+import { AutomationEngine } from '../services/AutomationEngine';
 
 const router = Router();
 
@@ -181,26 +182,59 @@ router.delete('/:id', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// POST /automations/:id/trigger — manually trigger an automation
-router.post('/:id/trigger', async (req: AuthRequest, res: Response) => {
+// GET /automations/:id/logs — paginated automation execution logs
+router.get('/:id/logs', async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(String(req.params.id), 10);
-
     if (isNaN(id)) {
       return errorResponse(res, 'Invalid automation ID', 400);
     }
 
     const automation = await Automation.findByPk(id);
-
     if (!automation) {
       return errorResponse(res, 'Automation not found', 404);
     }
 
-    // Verify workspace access through the board
     const board = await Board.findOne({
       where: { id: automation.boardId, workspaceId: req.user!.workspaceId },
     });
+    if (!board) {
+      return errorResponse(res, 'Access denied', 403);
+    }
 
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 25));
+    const offset = (page - 1) * limit;
+
+    const { count, rows: logs } = await AutomationLog.findAndCountAll({
+      where: { automationId: id },
+      order: [['executedAt', 'DESC']],
+      limit,
+      offset,
+    });
+
+    return paginatedResponse(res, logs, { page, limit, total: count });
+  } catch (error) {
+    return errorResponse(res, 'Failed to fetch automation logs', 500);
+  }
+});
+
+// POST /automations/:id/trigger — manually trigger via AutomationEngine
+router.post('/:id/trigger', async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(String(req.params.id), 10);
+    if (isNaN(id)) {
+      return errorResponse(res, 'Invalid automation ID', 400);
+    }
+
+    const automation = await Automation.findByPk(id);
+    if (!automation) {
+      return errorResponse(res, 'Automation not found', 404);
+    }
+
+    const board = await Board.findOne({
+      where: { id: automation.boardId, workspaceId: req.user!.workspaceId },
+    });
     if (!board) {
       return errorResponse(res, 'Access denied', 403);
     }
@@ -211,36 +245,12 @@ router.post('/:id/trigger', async (req: AuthRequest, res: Response) => {
 
     const { triggerData } = req.body;
 
-    // Create an automation log entry for the manual trigger
-    let logStatus: 'success' | 'failure' = 'success';
-    let actionResult: Record<string, unknown> = {};
-    let errorMessage: string | null = null;
-
-    try {
-      // Execute the automation action based on type
-      // For now, log the manual trigger execution
-      actionResult = {
-        triggeredBy: req.user!.id,
-        triggeredManually: true,
-        actionType: automation.actionType,
-        actionConfig: automation.actionConfig,
-        timestamp: new Date().toISOString(),
-      };
-    } catch (execError) {
-      logStatus = 'failure';
-      errorMessage = execError instanceof Error ? execError.message : 'Automation execution failed';
-    }
-
-    const automationLog = await AutomationLog.create({
-      automationId: automation.id,
-      status: logStatus,
-      triggerData: triggerData || { manual: true, triggeredBy: req.user!.id },
-      actionResult,
-      errorMessage,
-      executedAt: new Date(),
+    await AutomationEngine.evaluate(automation.triggerType, {
+      boardId: automation.boardId,
+      ...(triggerData || { manual: true, triggeredBy: req.user!.id }),
     });
 
-    return successResponse(res, { automationLog }, 'Automation triggered');
+    return successResponse(res, null, 'Automation triggered');
   } catch (error) {
     return errorResponse(res, 'Failed to trigger automation', 500);
   }

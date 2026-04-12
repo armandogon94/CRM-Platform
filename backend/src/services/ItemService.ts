@@ -9,6 +9,7 @@ import {
 } from '../models';
 import { AuthUser } from '../types';
 import wsService from './WebSocketService';
+import { AutomationEngine } from './AutomationEngine';
 
 export interface ColumnFilter {
   columnId: number;
@@ -279,6 +280,7 @@ export default class ItemService {
 
       const fullItem = (await ItemService.getById(item.id, boardId))!;
       wsService.emitToBoard(boardId, 'item:created', fullItem);
+      AutomationEngine.evaluate('on_item_created', { boardId, item: fullItem }).catch(() => {});
       return fullItem;
     } catch (error) {
       await transaction.rollback();
@@ -336,6 +338,7 @@ export default class ItemService {
 
       const fullItem = (await ItemService.getById(id, boardId))!;
       wsService.emitToBoard(boardId, 'item:updated', fullItem);
+      AutomationEngine.evaluate('on_item_updated', { boardId, item: fullItem, changes }).catch(() => {});
       return fullItem;
     } catch (error) {
       await transaction.rollback();

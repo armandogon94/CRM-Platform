@@ -3,6 +3,7 @@ import { sequelize, ColumnValue, Column, Item, ActivityLog } from '../models';
 import { AuthUser } from '../types';
 import { getHandler, AggregateResult } from '../eav';
 import wsService from './WebSocketService';
+import { AutomationEngine } from './AutomationEngine';
 
 export default class ColumnValueService {
   /**
@@ -41,9 +42,10 @@ export default class ColumnValueService {
 
       let columnValue: ColumnValue;
       let action: string;
+      let previousValue: any = undefined;
 
       if (existing) {
-        const previousValue = existing.value;
+        previousValue = existing.value;
         await existing.update({ value }, { transaction });
         columnValue = existing;
         action = 'updated';
@@ -99,12 +101,25 @@ export default class ColumnValueService {
       // Broadcast change to board room
       const item = await Item.findByPk(itemId);
       if (item) {
-        wsService.emitToBoard((item as any).boardId, 'column_value:changed', {
+        const boardId = (item as any).boardId;
+        wsService.emitToBoard(boardId, 'column_value:changed', {
           itemId,
           columnId,
           value: result.value,
           columnValue: result,
         });
+
+        // Check if this is a status column change → trigger automation
+        const column = await Column.findByPk(columnId);
+        if (column && (column as any).columnType === 'status') {
+          AutomationEngine.evaluate('on_status_changed', {
+            boardId,
+            itemId,
+            columnId,
+            oldValue: previousValue,
+            newValue: value,
+          }).catch(() => {});
+        }
       }
 
       return result;
