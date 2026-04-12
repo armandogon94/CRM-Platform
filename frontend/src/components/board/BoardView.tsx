@@ -6,6 +6,7 @@ import { CalendarView } from './CalendarView';
 import { TimelineView } from './TimelineView';
 import { ChartView } from './ChartView';
 import { FormView } from './FormView';
+import { DashboardView } from './DashboardView';
 
 interface BoardViewProps {
   board: Board;
@@ -61,11 +62,12 @@ export const BoardView: React.FC<BoardViewProps> = ({
         />
       );
     case 'dashboard':
+      return <DashboardView board={board} />;
     case 'map':
       return (
         <div className="flex items-center justify-center h-64 text-gray-500">
           <div className="text-center">
-            <p className="text-lg font-medium">{currentView.viewType === 'dashboard' ? 'Dashboard' : 'Map'} View</p>
+            <p className="text-lg font-medium">Map View</p>
             <p className="text-sm mt-1">Coming soon</p>
           </div>
         </div>

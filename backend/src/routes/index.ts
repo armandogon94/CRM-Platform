@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { authenticate } from '../middleware/auth';
 import { requireWorkspaceAccess } from '../middleware/rbac';
 import { AuthRequest } from '../types';
+import { Sequelize } from 'sequelize';
 import { successResponse, errorResponse, paginatedResponse } from '../utils/response';
 
 import authRouter from './auth';
@@ -153,6 +154,59 @@ router.get('/boards/:boardId/items', authenticate, async (req: AuthRequest, res:
     return successResponse(res, { items });
   } catch (error) {
     return errorResponse(res, 'Failed to fetch items', 500);
+  }
+});
+
+// GET /boards/:boardId/aggregates — aggregated data for dashboard widgets
+router.get('/boards/:boardId/aggregates', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const boardId = parseInt(req.params.boardId as string, 10);
+
+    const board = await Board.findOne({
+      where: { id: boardId, workspaceId: req.user!.workspaceId },
+    });
+    if (!board) return errorResponse(res, 'Board not found', 404);
+
+    // Total items
+    const totalItems = await Item.count({ where: { boardId } });
+
+    // Items by group
+    const itemsByGroupRows = await Item.findAll({
+      where: { boardId },
+      attributes: ['groupId', [Sequelize.fn('COUNT', Sequelize.col('id')), 'count']],
+      group: ['groupId'],
+      raw: true,
+    }) as any[];
+
+    const itemsByGroup: Record<number, number> = {};
+    for (const row of itemsByGroupRows) {
+      itemsByGroup[row.groupId] = parseInt(row.count, 10);
+    }
+
+    // Status counts — find status columns, then count values
+    const statusColumns = await Column.findAll({
+      where: { boardId, columnType: 'status' },
+    });
+
+    const statusCounts: Record<string, number> = {};
+    if (statusColumns.length > 0) {
+      const statusColumnIds = statusColumns.map((c: any) => c.id);
+      const valueCounts = await ColumnValue.findAll({
+        where: { columnId: statusColumnIds },
+        attributes: ['value', [Sequelize.fn('COUNT', Sequelize.col('id')), 'count']],
+        group: ['value'],
+        raw: true,
+      }) as any[];
+
+      for (const row of valueCounts) {
+        const label = typeof row.value === 'string' ? row.value : JSON.stringify(row.value);
+        statusCounts[label] = parseInt(row.count, 10);
+      }
+    }
+
+    return successResponse(res, { totalItems, statusCounts, itemsByGroup });
+  } catch (error) {
+    return errorResponse(res, 'Failed to fetch aggregates', 500);
   }
 });
 
