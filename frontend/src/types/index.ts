@@ -86,6 +86,18 @@ export interface Automation {
   createdBy: number;
 }
 
+export interface Notification {
+  id: number;
+  userId: number;
+  workspaceId: number;
+  title: string;
+  message: string | null;
+  type: 'info' | 'success' | 'warning' | 'error';
+  isRead: boolean;
+  linkUrl: string | null;
+  createdAt: string;
+}
+
 export interface ApiResponse<T = any> {
   success: boolean;
   data?: T;

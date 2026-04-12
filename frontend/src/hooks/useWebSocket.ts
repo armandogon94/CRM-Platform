@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import type { Item, ColumnValue } from '@/types';
+import type { Item, ColumnValue, Notification } from '@/types';
 
 interface WebSocketCallbacks {
   onItemCreated?: (item: Item) => void;
@@ -17,6 +17,7 @@ interface WebSocketCallbacks {
   onColumnCreated?: (column: any) => void;
   onColumnUpdated?: (column: any) => void;
   onColumnDeleted?: (data: { id: number; boardId: number }) => void;
+  onNotificationCreated?: (notification: Notification) => void;
 }
 
 interface UseWebSocketReturn {
@@ -102,6 +103,10 @@ export function useWebSocket(
 
     socket.on('column:deleted', (data: { id: number; boardId: number }) => {
       callbacksRef.current?.onColumnDeleted?.(data);
+    });
+
+    socket.on('notification:created', (notification: Notification) => {
+      callbacksRef.current?.onNotificationCreated?.(notification);
     });
 
     return () => {

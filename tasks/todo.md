@@ -30,11 +30,11 @@
 - [x] Task 5.2-5.3: DnD for columns/groups reorder (S)
 - [x] **Checkpoint: Slice 5** — 115 backend + 21 frontend tests passing
 
-## Slice 6: Notification Routes + UI
-- [ ] Task 6.1: NotificationService + routes (M)
-- [ ] Task 6.2: Add Notification type + WS listener (S)
-- [ ] Task 6.3: NotificationBell component (M)
-- [ ] **Checkpoint: Slice 6 / Phase 3A Complete** — full end-to-end verification
+## Slice 6: Notification Routes + UI ✅
+- [x] Task 6.1: NotificationService + routes (M) — RED→GREEN→REFACTOR→COMMIT
+- [x] Task 6.2: Add Notification type + WS listener (S)
+- [x] Task 6.3: NotificationBell component (M)
+- [x] **Checkpoint: Slice 6 / Phase 3A Complete** — 132 backend tests + 29 frontend tests, all passing
 
 ---
 

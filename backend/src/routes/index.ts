@@ -13,6 +13,7 @@ import itemRouter from './items';
 import columnValueRouter from './columnValues';
 import boardViewRouter from './boardViews';
 import automationRouter from './automations';
+import notificationRouter from './notifications';
 
 import Board from '../models/Board';
 import BoardGroup from '../models/BoardGroup';
@@ -28,6 +29,9 @@ router.use('/auth', authRouter);
 
 // ─── Automations (flat, already uses boardId query param) ───────────
 router.use('/automations', automationRouter);
+
+// ─── Notifications (user-scoped, authenticated) ────────────────────
+router.use('/notifications', authenticate, notificationRouter);
 
 // ─── Workspace-nested routes ────────────────────────────────────────
 router.use('/workspaces', authenticate, workspaceRouter);
