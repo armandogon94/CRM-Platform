@@ -14,6 +14,7 @@ import columnValueRouter from './columnValues';
 import boardViewRouter from './boardViews';
 import automationRouter from './automations';
 import notificationRouter from './notifications';
+import fileRouter from './files';
 
 import Board from '../models/Board';
 import BoardGroup from '../models/BoardGroup';
@@ -32,6 +33,9 @@ router.use('/automations', automationRouter);
 
 // ─── Notifications (user-scoped, authenticated) ────────────────────
 router.use('/notifications', authenticate, notificationRouter);
+
+// ─── Files (authenticated) ─────────────────────────────────────────
+router.use('/files', authenticate, fileRouter);
 
 // ─── Workspace-nested routes ────────────────────────────────────────
 router.use('/workspaces', authenticate, workspaceRouter);
