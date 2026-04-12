@@ -38,6 +38,33 @@
 
 ---
 
-**Total: 19 tasks across 6 slices with 6 checkpoints**
-**Estimated new test cases: ~77**
-**New files: ~24 | Modified files: ~16**
+## Phase 3B: Feature Completion
+
+## Slice 7: Automation Execution Engine ✅
+- [x] Task 7.1: TriggerEvaluator — pure function pattern matching (5 trigger types, 16 tests)
+- [x] Task 7.2: ActionExecutor — strategy pattern for 8 action types (10 tests)
+- [x] Task 7.3: AutomationEngine — orchestrator + automation log route (6 tests)
+- [x] Task 7.4: Wire automation evaluation into ItemService + ColumnValueService (3 tests)
+- [x] **Checkpoint: Slice 7** — 167 backend tests, all passing
+
+## Slice 8: File Upload/Download ✅
+- [x] Task 8.1: StorageService + file upload/download routes (5 + 4 tests)
+- [x] **Checkpoint: Slice 8** — 180 backend tests, all passing
+
+## Slice 9: Activity Log Routes + UI ✅
+- [x] Task 9.1: Activity log routes + ActivityFeed component (8 backend + 6 frontend tests)
+- [x] **Checkpoint: Slice 9** — 188 backend + 35 frontend = 223 total
+
+## Slice 10: Dashboard View ✅
+- [x] Task 10.1: Dashboard view with KPI cards, aggregates endpoint (3 backend + 6 frontend tests)
+- [x] **Checkpoint: Slice 10** — 191 backend + 41 frontend = 232 total
+
+## Slice 11: Map View ✅
+- [x] Task 11.1: Map view with Leaflet + LocationHandler (11 backend + 5 frontend tests)
+- [x] **Checkpoint: Slice 11 / Phase 3B Complete** — 202 backend + 46 frontend = 248 total
+
+---
+
+**Phase 3A: 19 tasks across 6 slices — COMPLETE**
+**Phase 3B: 7 tasks across 5 slices — COMPLETE**
+**Total tests: 248 (202 backend + 46 frontend)**
