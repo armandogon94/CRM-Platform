@@ -7,6 +7,7 @@ import { TimelineView } from './TimelineView';
 import { ChartView } from './ChartView';
 import { FormView } from './FormView';
 import { DashboardView } from './DashboardView';
+import { MapView } from './MapView';
 
 interface BoardViewProps {
   board: Board;
@@ -64,14 +65,7 @@ export const BoardView: React.FC<BoardViewProps> = ({
     case 'dashboard':
       return <DashboardView board={board} />;
     case 'map':
-      return (
-        <div className="flex items-center justify-center h-64 text-gray-500">
-          <div className="text-center">
-            <p className="text-lg font-medium">Map View</p>
-            <p className="text-sm mt-1">Coming soon</p>
-          </div>
-        </div>
-      );
+      return <MapView board={board} items={items} />;
     default:
       return <TableView board={board} items={items} onItemUpdate={onItemUpdate} onItemCreate={onItemCreate} onItemDelete={onItemDelete} />;
   }
