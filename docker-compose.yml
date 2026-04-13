@@ -3,7 +3,7 @@ services:
     image: postgres:15
     container_name: crm-postgres
     ports:
-      - "5432:5432"
+      - "5438:5432"
     environment:
       POSTGRES_DB: crm_platform
       POSTGRES_USER: crm_admin
@@ -23,7 +23,7 @@ services:
     image: redis:7-alpine
     container_name: crm-redis
     ports:
-      - "6379:6379"
+      - "6383:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -55,7 +55,7 @@ services:
     volumes:
       - ./backend:/app
       - /app/node_modules
-    command: npx ts-node-dev --respawn src/server.ts
+    command: sh -c "npx sequelize-cli db:migrate && npx ts-node-dev --respawn src/server.ts"
     networks:
       - crm-network
 

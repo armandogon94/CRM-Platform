@@ -1,7 +1,7 @@
 import http from 'http';
 import app from './app';
 import config from './config';
-import { testConnection, syncDatabase } from './config/database';
+import { testConnection, runMigrations } from './config/database';
 import { logger } from './utils/logger';
 import { wsService } from './services/WebSocketService';
 
@@ -26,9 +26,8 @@ async function startServer(): Promise<void> {
     // Test database connection
     await testConnection();
 
-    // Sync models (do not force in production)
-    const forceSync = false;
-    await syncDatabase(forceSync);
+    // Run database migrations
+    await runMigrations();
 
     // Start listening
     server.listen(config.port, () => {

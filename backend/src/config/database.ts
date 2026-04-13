@@ -40,6 +40,10 @@ export async function testConnection(): Promise<void> {
   }
 }
 
+/**
+ * @deprecated Use migrations instead: `npx sequelize-cli db:migrate`
+ * Retained for test environments that need fast schema setup.
+ */
 export async function syncDatabase(force = false): Promise<void> {
   try {
     await sequelize.sync({ force });
@@ -48,6 +52,23 @@ export async function syncDatabase(force = false): Promise<void> {
     console.error('[Database] Sync failed:', error);
     throw error;
   }
+}
+
+export async function runMigrations(): Promise<void> {
+  const { Umzug, SequelizeStorage } = await import('umzug');
+  const path = await import('path');
+
+  const umzug = new Umzug({
+    migrations: {
+      glob: path.join(__dirname, '../migrations/*.js'),
+    },
+    context: sequelize.getQueryInterface(),
+    storage: new SequelizeStorage({ sequelize }),
+    logger: console,
+  });
+
+  await umzug.up();
+  console.log('[Database] Migrations complete.');
 }
 
 export { sequelize };
