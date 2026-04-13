@@ -1,5 +1,7 @@
 import { Server as HttpServer } from 'http';
 import { Server as SocketServer, Socket } from 'socket.io';
+import { createAdapter } from '@socket.io/redis-adapter';
+import Redis from 'ioredis';
 import jwt from 'jsonwebtoken';
 import config from '../config';
 import { AuthUser } from '../types';
@@ -25,6 +27,18 @@ class WebSocketService {
         credentials: true,
       },
     });
+
+    // Wire Redis adapter for horizontal scaling
+    if (config.redisUrl) {
+      try {
+        const pubClient = new Redis(config.redisUrl);
+        const subClient = pubClient.duplicate();
+        this.io.adapter(createAdapter(pubClient, subClient));
+        logger.info('Socket.io Redis adapter connected');
+      } catch (err) {
+        logger.warn('Socket.io Redis adapter failed, falling back to in-memory:', (err as Error).message);
+      }
+    }
 
     // Auth middleware — verify JWT on connection
     this.io.use((socket: Socket, next: (err?: Error) => void) => {

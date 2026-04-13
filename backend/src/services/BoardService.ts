@@ -10,6 +10,7 @@ import {
   ActivityLog,
 } from '../models';
 import { AuthUser } from '../types';
+import type { RedisService } from './RedisService';
 
 export default class BoardService {
   /**
@@ -60,6 +61,44 @@ export default class BoardService {
         [{ model: Column, as: 'columns' }, 'position', 'ASC'],
       ],
     });
+  }
+
+  private static CACHE_TTL = 300; // 5 minutes
+
+  /**
+   * Cache-aside wrapper for getById.
+   * Checks Redis first, falls back to DB on miss, caches the result.
+   */
+  static async getByIdCached(
+    id: number,
+    workspaceId: number,
+    cache: RedisService
+  ): Promise<Board | Record<string, unknown> | null> {
+    const cacheKey = `board:${id}:ws:${workspaceId}`;
+
+    // Try cache first
+    const cached = await cache.get<Record<string, unknown>>(cacheKey);
+    if (cached) return cached;
+
+    // Cache miss — query DB
+    const board = await BoardService.getById(id, workspaceId);
+    if (!board) return null;
+
+    // Cache the serialized result
+    const serialized = board.toJSON ? (board.toJSON() as unknown as Record<string, unknown>) : (board as unknown as Record<string, unknown>);
+    await cache.set(cacheKey, serialized, BoardService.CACHE_TTL);
+    return serialized;
+  }
+
+  /**
+   * Invalidate board cache after mutations.
+   */
+  static async invalidateBoardCache(
+    boardId: number,
+    workspaceId: number,
+    cache: RedisService
+  ): Promise<void> {
+    await cache.del(`board:${boardId}:ws:${workspaceId}`);
   }
 
   /**
