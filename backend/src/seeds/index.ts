@@ -597,9 +597,16 @@ async function seed(): Promise<void> {
 // ─── Run seed when executed directly ────────────────────────────────────────
 
 // ─── Industry Seeders ───────────────────────────────────────────────────────
-import { seedMedVista } from './medvista';
-import { seedUrbanNest } from './urbannest';
-import { seedJurisPath } from './jurispath';
+import { seedNovaPay }    from './novapay';
+import { seedMedVista }   from './medvista';
+import { seedTrustGuard } from './trustguard';
+import { seedUrbanNest }  from './urbannest';
+import { seedSwiftRoute } from './swiftroute';
+import { seedDentaFlow }  from './dentaflow';
+import { seedJurisPath }  from './jurispath';
+import { seedTableSync }  from './tablesync';
+import { seedCraneStack } from './cranestack';
+import { seedEduPulse }   from './edupulse';
 
 async function run(): Promise<void> {
   try {
@@ -609,12 +616,19 @@ async function run(): Promise<void> {
 
     await seed();
 
-    // Seed industry verticals
+    // Seed all 10 industry verticals
     log('Seeding industry verticals...');
+    await seedNovaPay();
     await seedMedVista();
+    await seedTrustGuard();
     await seedUrbanNest();
+    await seedSwiftRoute();
+    await seedDentaFlow();
     await seedJurisPath();
-    log('All industry verticals seeded.');
+    await seedTableSync();
+    await seedCraneStack();
+    await seedEduPulse();
+    log('All 10 industry verticals seeded.');
   } catch (error) {
     logError('Seed process failed.', error);
     process.exit(1);

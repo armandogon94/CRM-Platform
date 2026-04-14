@@ -32,28 +32,11 @@ async function hashPassword(password: string): Promise<string> {
 
 // ─── Main seed function ─────────────────────────────────────────────────────
 
-async function seed(): Promise<void> {
+export async function seedCraneStack(): Promise<void> {
   const transaction = await sequelize.transaction();
 
   try {
-    // ─── 1. Clear existing data ──────────────────────────────────────────
-    log('Clearing existing data...');
-    await FileAttachment.destroy({ where: {}, force: true, transaction });
-    await Notification.destroy({ where: {}, force: true, transaction });
-    await ActivityLog.destroy({ where: {}, force: true, transaction });
-    await AutomationLog.destroy({ where: {}, force: true, transaction });
-    await Automation.destroy({ where: {}, force: true, transaction });
-    await ColumnValue.destroy({ where: {}, force: true, transaction });
-    await Item.destroy({ where: {}, force: true, transaction });
-    await Column.destroy({ where: {}, force: true, transaction });
-    await BoardView.destroy({ where: {}, force: true, transaction });
-    await BoardGroup.destroy({ where: {}, force: true, transaction });
-    await Board.destroy({ where: {}, force: true, transaction });
-    await User.destroy({ where: {}, force: true, transaction });
-    await Workspace.destroy({ where: {}, force: true, transaction });
-    log('All tables cleared.');
-
-    // ─── 2. Workspace ────────────────────────────────────────────────────
+    // ─── 1. Workspace ────────────────────────────────────────────────────
     log('Creating CraneStack workspace...');
     const workspace = await Workspace.create(
       {
@@ -1076,21 +1059,20 @@ async function seed(): Promise<void> {
 
 // ─── Run seed when executed directly ────────────────────────────────────────
 
-async function run(): Promise<void> {
-  try {
-    log('Connecting to database...');
-    await sequelize.authenticate();
-    log('Database connection established.');
-    await seed();
-  } catch (error) {
-    logError('Seed process failed.', error);
-    process.exit(1);
-  } finally {
-    await sequelize.close();
-    log('Database connection closed.');
-  }
+// Run standalone: npx ts-node src/seeds/cranestack/index.ts
+if (require.main === module) {
+  (async () => {
+    try {
+      log('Connecting to database...');
+      await sequelize.authenticate();
+      log('Database connection established.');
+      await seedCraneStack();
+    } catch (error) {
+      logError('Seed process failed.', error);
+      process.exit(1);
+    } finally {
+      await sequelize.close();
+      log('Database connection closed.');
+    }
+  })();
 }
-
-run();
-
-export default seed;
