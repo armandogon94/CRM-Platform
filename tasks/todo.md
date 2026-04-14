@@ -97,12 +97,17 @@
 
 ---
 
-## Remaining Work
+## Slice 15: Frontend Test Coverage ✅
+- [x] Test infrastructure: @vitest/coverage-v8, test scripts, test-utils.tsx, fixtures.ts
+- [x] AuthContext, LoginPage, useWebSocket, ColumnRenderer, ColumnEditor, FilterPanel
+- [x] TableView, KanbanView, CalendarView, BoardPage, BoardListPage
+- [x] SortPanel, BoardView, FormView, ChartView, WorkspaceContext, api.ts
+- [x] ThemeProvider, MainLayout, useBoards, App, ColorPicker
+- [x] **Checkpoint: Slice 15** — 254 frontend tests, 28 suites, 70.06% line coverage
 
-### Slice 15: Frontend Test Coverage (Size: L) — NEXT
-- [ ] MSW setup for API mocking
-- [ ] Test files: TableView, KanbanView, CalendarView, DashboardView, ColumnRenderer, ColumnEditor, FilterPanel, NotificationBell, useBoard, useWebSocket, AuthContext, LoginPage, BoardPage
-- [ ] Target: 70%+ frontend coverage
+---
+
+## Remaining Work
 
 ### Slice 16: Shared Component Library Extraction (Size: XL)
 - [ ] Extract reusable components into `frontends/_shared/`
