@@ -129,7 +129,7 @@ export function CalendarView({
       </div>
 
       <div className="grid grid-cols-7 gap-px bg-gray-200 -mt-4">
-        {calendarDays.map((day) => {
+        {calendarDays.map((day: Date) => {
           const key = format(day, 'yyyy-MM-dd');
           const dayItems = itemsByDate.get(key) || [];
           const isCurrentMonth = isSameMonth(day, currentDate);

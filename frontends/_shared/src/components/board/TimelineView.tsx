@@ -225,7 +225,7 @@ export function TimelineView({
           <div className="flex-1 overflow-x-auto">
             <div style={{ width: `${totalDays * dayWidth}px`, position: 'relative' }}>
               <div className="h-[50px] border-b border-gray-200 flex relative">
-                {weeks.map((weekStart, idx) => {
+                {weeks.map((weekStart: Date, idx: number) => {
                   const weekOffset = differenceInDays(weekStart, viewStart);
                   if (weekOffset < 0) return null;
                   return (

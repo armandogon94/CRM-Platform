@@ -18,10 +18,18 @@
   "devDependencies": {
     "@testing-library/react": "^14.0.0",
     "@testing-library/user-event": "^14.0.0",
+    "@types/leaflet": "^1.9.21",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^4.0.0",
+    "date-fns": "^4.1.0",
     "jsdom": "^24.0.0",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^1.8.0",
+    "react-leaflet": "^5.0.0",
+    "react-router-dom": "^7.14.1",
+    "recharts": "^3.8.1",
+    "socket.io-client": "^4.8.3",
     "typescript": "^5.2.2",
     "vitest": "^1.6.1"
   }

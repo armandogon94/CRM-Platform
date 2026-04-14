@@ -173,7 +173,16 @@ export default function BoardPage({ theme }: BoardPageProps) {
   }
 
   const currentView = board.views?.find((v) => v.viewType === activeView) ??
-    ({ id: 0, boardId: board.id, viewType: activeView, name: VIEW_LABELS[activeView], position: 0, settings: {} } as BoardViewType);
+    ({
+      id: 0,
+      boardId: board.id,
+      viewType: activeView,
+      name: VIEW_LABELS[activeView],
+      position: 0,
+      settings: {},
+      layoutJson: null,
+      isDefault: false,
+    } as BoardViewType);
 
   return (
     <MainLayout theme={theme}>

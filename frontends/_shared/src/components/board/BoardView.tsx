@@ -13,9 +13,9 @@ interface BoardViewProps {
   board: Board;
   items: Item[];
   currentView: BoardViewType;
-  onItemUpdate: (itemId: number, columnId: number, value: any) => void;
-  onItemCreate: (groupId: number, name: string) => void;
-  onItemDelete: (itemId: number) => void;
+  onItemUpdate?: (itemId: number, columnId: number, value: any) => void;
+  onItemCreate?: (groupId: number, name: string) => void;
+  onItemDelete?: (itemId: number) => void;
 }
 
 export const BoardView: React.FC<BoardViewProps> = ({
@@ -58,7 +58,7 @@ export const BoardView: React.FC<BoardViewProps> = ({
         <FormView
           board={board}
           onSubmit={(name, _values) => {
-            onItemCreate(board.groups[0]?.id || 0, name);
+            onItemCreate?.(board.groups[0]?.id || 0, name);
           }}
         />
       );

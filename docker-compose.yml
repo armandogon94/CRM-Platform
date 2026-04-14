@@ -75,6 +75,7 @@ services:
       VITE_API_URL: http://localhost:13000
     volumes:
       - ./frontends/novapay:/app
+      - ./frontends/_shared:/app/_shared:ro
       - /app/node_modules
     networks:
       - crm-network
@@ -93,6 +94,7 @@ services:
       VITE_API_URL: http://localhost:13000
     volumes:
       - ./frontends/medvista:/app
+      - ./frontends/_shared:/app/_shared:ro
       - /app/node_modules
     networks:
       - crm-network
@@ -111,6 +113,7 @@ services:
       VITE_API_URL: http://localhost:13000
     volumes:
       - ./frontends/trustguard:/app
+      - ./frontends/_shared:/app/_shared:ro
       - /app/node_modules
     networks:
       - crm-network
@@ -129,6 +132,7 @@ services:
       VITE_API_URL: http://localhost:13000
     volumes:
       - ./frontends/urbannest:/app
+      - ./frontends/_shared:/app/_shared:ro
       - /app/node_modules
     networks:
       - crm-network
@@ -147,6 +151,7 @@ services:
       VITE_API_URL: http://localhost:13000
     volumes:
       - ./frontends/swiftroute:/app
+      - ./frontends/_shared:/app/_shared:ro
       - /app/node_modules
     networks:
       - crm-network
@@ -165,6 +170,7 @@ services:
       VITE_API_URL: http://localhost:13000
     volumes:
       - ./frontends/dentaflow:/app
+      - ./frontends/_shared:/app/_shared:ro
       - /app/node_modules
     networks:
       - crm-network
@@ -183,6 +189,7 @@ services:
       VITE_API_URL: http://localhost:13000
     volumes:
       - ./frontends/jurispath:/app
+      - ./frontends/_shared:/app/_shared:ro
       - /app/node_modules
     networks:
       - crm-network
@@ -201,6 +208,7 @@ services:
       VITE_API_URL: http://localhost:13000
     volumes:
       - ./frontends/tablesync:/app
+      - ./frontends/_shared:/app/_shared:ro
       - /app/node_modules
     networks:
       - crm-network
@@ -219,6 +227,7 @@ services:
       VITE_API_URL: http://localhost:13000
     volumes:
       - ./frontends/cranestack:/app
+      - ./frontends/_shared:/app/_shared:ro
       - /app/node_modules
     networks:
       - crm-network
@@ -237,6 +246,7 @@ services:
       VITE_API_URL: http://localhost:13000
     volumes:
       - ./frontends/edupulse:/app
+      - ./frontends/_shared:/app/_shared:ro
       - /app/node_modules
     networks:
       - crm-network

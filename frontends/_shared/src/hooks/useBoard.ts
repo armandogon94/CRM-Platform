@@ -3,9 +3,16 @@ import type { Board, Item, BoardGroup, Column, ColumnValue } from '../types/inde
 import { useWebSocket } from './useWebSocket';
 import api from '../utils/api';
 
+interface FilterItem {
+  columnId: number;
+  operator: string;
+  value?: any;
+}
+
 interface RefreshItemsOptions {
   page?: number;
   limit?: number;
+  columnFilters?: FilterItem[];
   sortByColumn?: number;
   sortOrder?: 'ASC' | 'DESC';
 }
@@ -156,9 +163,13 @@ export function useBoard(boardId: number): UseBoardReturn {
 
   const refreshItems = useCallback(
     async (options: RefreshItemsOptions = {}) => {
-      const { page = 1, limit = 50, sortByColumn, sortOrder } = options;
+      const { page = 1, limit = 50, columnFilters, sortByColumn, sortOrder } = options;
       try {
         let url = `/boards/${boardId}/items?page=${page}&limit=${limit}`;
+        if (columnFilters && columnFilters.length > 0) {
+          const encoded = btoa(JSON.stringify(columnFilters));
+          url += `&columnFilters=${encoded}`;
+        }
         if (sortByColumn) url += `&sortByColumn=${sortByColumn}`;
         if (sortOrder) url += `&sortOrder=${sortOrder}`;
         const res = await api.get<{ items: Item[] }>(url);
