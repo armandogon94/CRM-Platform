@@ -65,6 +65,56 @@
 
 ---
 
+## Phase 3C: Infrastructure
+
+## Slice 12: Sequelize Migrations Baseline ✅
+- [x] Task 12.1: Baseline migration (13 tables), follow-up migration (location type + last_triggered_at), umzug runner, sequelize-cli config
+- [x] **Checkpoint: Slice 12** — 253 total tests
+
+## Slice 13: Redis Caching Layer ✅
+- [x] Task 13.1: RedisService (get/set/del/invalidatePattern with crm: prefix)
+- [x] Task 13.2: BoardService.getByIdCached() cache-aside pattern (5-min TTL)
+- [x] Task 13.3: Socket.io Redis adapter wired into WebSocketService
+- [x] **Checkpoint: Slice 13** — 261 total tests (8 new: 5 RedisService + 3 BoardService.cache)
+
+## Slice 14: Backend Test Coverage Push ✅
+- [x] Task 14.1: Test factories (9 factory functions)
+- [x] Task 14.2: WorkspaceService tests (10 tests)
+- [x] Task 14.3: BoardViewService tests (11 tests)
+- [x] Task 14.4: BoardService core tests (10 tests)
+- [x] Task 14.5: ItemService core tests (14 tests)
+- [x] Task 14.6: ColumnValueService core tests (16 tests)
+- [x] Task 14.7: EAV handlers comprehensive tests (147 tests for all 15 types)
+- [x] Task 14.8: Board routes tests (19 tests)
+- [x] **Checkpoint: Slice 14 / Phase 3C Complete** — 442 backend + 46 frontend = 488 total
+
+---
+
 **Phase 3A: 19 tasks across 6 slices — COMPLETE**
 **Phase 3B: 7 tasks across 5 slices — COMPLETE**
-**Total tests: 248 (202 backend + 46 frontend)**
+**Phase 3C: 8 tasks across 3 slices — COMPLETE**
+**Total tests: 488 (442 backend + 46 frontend)**
+
+---
+
+## Remaining Work
+
+### Slice 15: Frontend Test Coverage (Size: L) — NEXT
+- [ ] MSW setup for API mocking
+- [ ] Test files: TableView, KanbanView, CalendarView, DashboardView, ColumnRenderer, ColumnEditor, FilterPanel, NotificationBell, useBoard, useWebSocket, AuthContext, LoginPage, BoardPage
+- [ ] Target: 70%+ frontend coverage
+
+### Slice 16: Shared Component Library Extraction (Size: XL)
+- [ ] Extract reusable components into `frontends/_shared/`
+- [ ] ThemeConfig interface
+- [ ] Docker volume mount
+
+### Slice 17: Industry Board Templates + Seed Data (Size: XL)
+- [ ] 3-5 templates per industry (50 total)
+- [ ] 50-200 records per template
+- [ ] 4 automation rules per industry
+
+### Slice 18: Industry Frontend Production Quality (Size: XL)
+- [ ] Upgrade 9 industry frontends
+- [ ] Apply brand themes from INDUSTRY-BRANDING-CONTEXT.md
+- [ ] Wire WebSocket, routing, shared components
