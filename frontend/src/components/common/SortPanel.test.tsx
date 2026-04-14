@@ -94,4 +94,42 @@ describe('SortPanel', () => {
     render(<SortPanel columns={[COL_A, COL_B]} sorts={sorts} onChange={onChange} />);
     expect(screen.queryByRole('button', { name: /add sort/i })).not.toBeInTheDocument();
   });
+
+  it('clicking "Move up" swaps sort with the one above it', () => {
+    const onChange = vi.fn();
+    const sorts: SortRule[] = [
+      { columnId: COL_A.id, direction: 'ASC' },
+      { columnId: COL_B.id, direction: 'DESC' },
+    ];
+    const { container } = render(
+      <SortPanel columns={[COL_A, COL_B, COL_C]} sorts={sorts} onChange={onChange} />
+    );
+    // Second sort row — click its move-up button (first button in that row)
+    const sortRows = container.querySelectorAll('.bg-gray-50');
+    const secondRowButtons = sortRows[1].querySelectorAll('button');
+    fireEvent.click(secondRowButtons[0]); // move-up
+    expect(onChange).toHaveBeenCalledWith([
+      { columnId: COL_B.id, direction: 'DESC' },
+      { columnId: COL_A.id, direction: 'ASC' },
+    ]);
+  });
+
+  it('clicking "Move down" swaps sort with the one below it', () => {
+    const onChange = vi.fn();
+    const sorts: SortRule[] = [
+      { columnId: COL_A.id, direction: 'ASC' },
+      { columnId: COL_B.id, direction: 'DESC' },
+    ];
+    const { container } = render(
+      <SortPanel columns={[COL_A, COL_B, COL_C]} sorts={sorts} onChange={onChange} />
+    );
+    // First sort row — click its move-down button (second button in that row)
+    const sortRows = container.querySelectorAll('.bg-gray-50');
+    const firstRowButtons = sortRows[0].querySelectorAll('button');
+    fireEvent.click(firstRowButtons[1]); // move-down
+    expect(onChange).toHaveBeenCalledWith([
+      { columnId: COL_B.id, direction: 'DESC' },
+      { columnId: COL_A.id, direction: 'ASC' },
+    ]);
+  });
 });

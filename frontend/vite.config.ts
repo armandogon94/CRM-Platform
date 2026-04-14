@@ -32,6 +32,8 @@ export default defineConfig({
         'src/main.tsx',
         'src/vite-env.d.ts',
         'src/test/**',
+        // Stale prototype files superseded by the refactored component structure
+        'src/components/*.tsx',
       ],
     },
   },

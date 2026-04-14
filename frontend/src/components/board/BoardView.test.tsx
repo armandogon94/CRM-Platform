@@ -92,4 +92,31 @@ describe('BoardView (view router)', () => {
     );
     expect(screen.getByText('MapView')).toBeInTheDocument();
   });
+
+  it('viewType "timeline" renders TimelineView', () => {
+    const view = makeBoardView({ viewType: 'timeline' });
+    render(
+      <BoardView board={board} items={items} currentView={view}
+        onItemUpdate={noop} onItemCreate={noop} onItemDelete={noop} />
+    );
+    expect(screen.getByText('TimelineView')).toBeInTheDocument();
+  });
+
+  it('viewType "chart" renders ChartView', () => {
+    const view = makeBoardView({ viewType: 'chart' });
+    render(
+      <BoardView board={board} items={items} currentView={view}
+        onItemUpdate={noop} onItemCreate={noop} onItemDelete={noop} />
+    );
+    expect(screen.getByText('ChartView')).toBeInTheDocument();
+  });
+
+  it('viewType "form" renders FormView', () => {
+    const view = makeBoardView({ viewType: 'form' });
+    render(
+      <BoardView board={board} items={items} currentView={view}
+        onItemUpdate={noop} onItemCreate={noop} onItemDelete={noop} />
+    );
+    expect(screen.getByText('FormView')).toBeInTheDocument();
+  });
 });
