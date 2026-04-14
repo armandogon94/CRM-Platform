@@ -109,10 +109,17 @@
 
 ## Remaining Work
 
-### Slice 16: Shared Component Library Extraction (Size: XL)
-- [ ] Extract reusable components into `frontends/_shared/`
-- [ ] ThemeConfig interface
-- [ ] Docker volume mount
+### Slice 16: Shared Component Library Extraction ✅
+- [x] `frontends/_shared/` package with vitest, TypeScript config
+- [x] ThemeConfig + INDUSTRY_THEMES (10 presets), 7 tests passing
+- [x] Types, fetch-based api.ts, AuthContext, WorkspaceContext
+- [x] useWebSocket, useBoard (with columnFilters), useBoards hooks
+- [x] Common components: StatusBadge, PersonAvatar, ThemeProvider, ColorPicker, FilterPanel, SortPanel, NotificationBell
+- [x] All 8 board views: ColumnEditor, ColumnRenderer, BoardView, TableView, KanbanView, FormView, ChartView, MapView, CalendarView, TimelineView, DashboardView
+- [x] Layout: MainLayout, Sidebar (themed with ThemeConfig)
+- [x] Pages: LoginPage, BoardListPage, BoardPage (all accept optional ThemeConfig)
+- [x] Docker: `./frontends/_shared:/app/_shared:ro` volume added to all 10 industry frontend containers
+- [x] tsc --noEmit: 0 errors
 
 ### Slice 17: Industry Board Templates + Seed Data (Size: XL)
 - [ ] 3-5 templates per industry (50 total)
