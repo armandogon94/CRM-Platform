@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from './context/AuthContext';
 import { LoginPage } from './components/LoginPage';
 import { Sidebar } from './components/Sidebar';
@@ -7,6 +7,8 @@ import { OverviewDashboard } from './components/OverviewDashboard';
 import { AutomationsPanel } from './components/AutomationsPanel';
 import { api } from './utils/api';
 import type { Board, Item, Automation } from './types';
+import { io } from 'socket.io-client';
+import { getAuthToken } from './utils/api';
 
 function AppContent() {
   const { user } = useAuth();
@@ -17,6 +19,31 @@ function AppContent() {
   const [allItems, setAllItems] = useState<Record<number, Item[]>>({});
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [boardLoading, setBoardLoading] = useState(false);
+  const socketRef = useRef<ReturnType<typeof io> | null>(null);
+
+  // Real-time WebSocket updates
+  useEffect(() => {
+    if (!user) return;
+    const token = getAuthToken() || '';
+    const socket = io('/', { auth: { token }, transports: ['websocket'] });
+    socketRef.current = socket;
+    socket.on('item:created', (item: Item) => {
+      setCurrentItems(prev => [...prev, item]);
+    });
+    socket.on('item:updated', (item: Item) => {
+      setCurrentItems(prev => prev.map(i => i.id === item.id ? item : i));
+    });
+    socket.on('item:deleted', ({ id }: { id: number }) => {
+      setCurrentItems(prev => prev.filter(i => i.id !== id));
+    });
+    return () => { socket.disconnect(); };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (currentBoard?.id && socketRef.current?.connected) {
+      socketRef.current.emit('board:join', { boardId: currentBoard.id });
+    }
+  }, [currentBoard?.id]);
 
   useEffect(() => {
     if (!user?.workspaceId) return;
