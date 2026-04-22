@@ -17,6 +17,7 @@ import automationRouter from './automations';
 import notificationRouter from './notifications';
 import fileRouter from './files';
 import activityLogRouter from './activityLogs';
+import adminE2eRouter from './admin.e2e';
 
 import Board from '../models/Board';
 import BoardGroup from '../models/BoardGroup';
@@ -41,6 +42,12 @@ router.use('/files', authenticate, fileRouter);
 
 // ─── Activity Logs (authenticated) ────────────────────────────────
 router.use('/activity', authenticate, activityLogRouter);
+
+// ─── E2E admin (env-guarded + authenticated inside router) ─────────
+// The router applies its own env-guard (NODE_ENV + E2E_RESET_ENABLED)
+// BEFORE authenticate so unauthenticated probes get the same 404 as
+// the route being hidden entirely.
+router.use('/admin/e2e', adminE2eRouter);
 
 // ─── Workspace-nested routes ────────────────────────────────────────
 router.use('/workspaces', authenticate, workspaceRouter);
