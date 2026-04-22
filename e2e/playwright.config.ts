@@ -75,6 +75,10 @@ export default defineConfig({
     {
       name: 'desktop-novapay',
       dependencies: ['setup'],
+      // Flow 6 is owned by `desktop-branding-all`, which runs pre-auth
+      // across all 10 industries. Excluding it here avoids running it
+      // twice (and under the wrong — authenticated — storageState).
+      testIgnore: /06-branding-per-industry\.spec\.ts$/,
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 1440, height: 900 },
@@ -83,23 +87,32 @@ export default defineConfig({
       },
     },
     {
-      // TODO(Slice 19 D6): parameterize over INDUSTRY_THEMES to fan out
-      // across all 10 industry frontends (ports 13001-13010). For C2 this
-      // project name simply needs to exist so --list reports it.
+      // Slice 19 D6: exclusively runs the per-industry branding smoke
+      // spec. The spec itself parameterises over INDUSTRY_THEMES (one
+      // test per industry, all parallel), so this project only needs
+      // to match that single file.
+      //
+      // No auth required — the login page is already fully themed via
+      // props, so we deliberately skip the `setup` dependency and
+      // drop `storageState` entirely. See the spec's top-of-file note
+      // for why Flow 6 runs pre-auth.
       name: 'desktop-branding-all',
-      dependencies: ['setup'],
+      dependencies: [],
+      testMatch: /06-branding-per-industry\.spec\.ts$/,
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 1440, height: 900 },
         baseURL: NOVAPAY_BASE_URL,
-        storageState: NOVAPAY_AUTH_STATE,
       },
     },
     {
       // Mobile-specific testMatch filtering will be tightened in Task F1;
-      // for C2 the project runs every spec in ./specs.
+      // for C2 the project runs every spec in ./specs. Flow 6 is
+      // desktop-only (branding assertions don't benefit from mobile
+      // emulation), so it's excluded here as well.
       name: 'mobile-novapay',
       dependencies: ['setup'],
+      testIgnore: /06-branding-per-industry\.spec\.ts$/,
       use: {
         ...devices['iPhone 14 Pro'],
         baseURL: NOVAPAY_BASE_URL,
