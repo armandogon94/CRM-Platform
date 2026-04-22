@@ -53,6 +53,14 @@ export class RedisService {
     await pipeline.exec();
   }
 
+  /**
+   * Lightweight liveness probe used by the /health endpoint.
+   * Resolves with 'PONG' when the connection is healthy, rejects otherwise.
+   */
+  async ping(): Promise<string> {
+    return this.client.ping();
+  }
+
   getClient(): Redis {
     return this.client;
   }

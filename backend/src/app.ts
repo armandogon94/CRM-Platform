@@ -8,6 +8,25 @@ import routes from './routes';
 import { notFoundHandler, errorHandler } from './middleware/errorHandler';
 import { logger } from './utils/logger';
 
+const HEALTH_PROBE_TIMEOUT_MS = 2000;
+
+/**
+ * Race a probe against a timeout; never throws — returns 'ok' or 'error'.
+ * Used by /health to keep the endpoint fast and predictable even when a
+ * dependency hangs.
+ */
+async function probeOk(fn: () => Promise<unknown>, timeoutMs: number): Promise<'ok' | 'error'> {
+  try {
+    await Promise.race([
+      fn(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
+    ]);
+    return 'ok';
+  } catch {
+    return 'error';
+  }
+}
+
 // Load model associations before anything uses them
 import './models/index';
 
@@ -59,11 +78,25 @@ const limiter = rateLimit({
 app.use('/api', limiter);
 
 // ---------------------------------------------------------------------------
-// Health check
+// Health check — probes DB and Redis in parallel with a 2s timeout each.
+// Returns 200 + status=ok when both healthy, 503 + status=degraded otherwise.
 // ---------------------------------------------------------------------------
-app.get('/health', (_req, res) => {
-  res.status(200).json({
-    status: 'ok',
+app.get('/health', async (_req, res) => {
+  // Lazy-imported so test suites that never hit /health don't force the
+  // config/database or RedisService modules to load (keeps their mocks inert).
+  const { sequelize } = await import('./config/database');
+  const { redisService } = await import('./services/RedisService');
+
+  const [db, redis] = await Promise.all([
+    probeOk(() => sequelize.authenticate(), HEALTH_PROBE_TIMEOUT_MS),
+    probeOk(() => redisService.ping(), HEALTH_PROBE_TIMEOUT_MS),
+  ]);
+
+  const healthy = db === 'ok' && redis === 'ok';
+  res.status(healthy ? 200 : 503).json({
+    status: healthy ? 'ok' : 'degraded',
+    db,
+    redis,
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
   });
