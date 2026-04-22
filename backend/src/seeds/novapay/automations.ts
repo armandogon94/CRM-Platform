@@ -1,5 +1,5 @@
-import { Automation } from '../../models';
-import { NovaPayContext } from './workspace';
+import { Automation, Board, Column, User, Workspace } from '../../models';
+import { NovaPayContext, NOVAPAY_E2E_EMAIL, NOVAPAY_E2E_WORKSPACE_SLUG } from './workspace';
 import { NovaPayBoards } from './boards';
 
 export async function seedAutomations(
@@ -131,4 +131,116 @@ export async function seedAutomations(
   }
 
   console.log(`[NovaPay] Seeded ${automations.length} automation rules`);
+}
+
+/**
+ * Seeds the Slice 19 Flow 5 automation:
+ *   "On Status = Flagged → create in-app notification for the E2E user"
+ *
+ * Scope: fixture workspace only. The Playwright suite resets this workspace
+ * between runs (see `E2EResetService`), so a self-contained rule is required
+ * to keep the main NovaPay demo untouched by E2E side effects.
+ *
+ * Idempotency: keyed on `(boardId, triggerType, triggerConfig.toStatus)` so
+ * repeated `seedNovaPay()` calls or re-seeds from the reset service never
+ * produce duplicate rules. Also creates (or reuses) a minimal fixture board
+ * with a Status column — this is the board the Playwright spec targets.
+ *
+ * Field contract follows `Automation.ts` + `TriggerEvaluator.matchStatusChanged`
+ * + `ActionExecutor.sendNotification` (trigger = `on_status_changed`,
+ * action = `send_notification`).
+ */
+export async function seedNovaPayE2eFlaggedAutomation(): Promise<void> {
+  console.log('[NovaPay] Seeding E2E fixture Flagged→notification automation...');
+
+  const fixtureWorkspace = await Workspace.findOne({
+    where: { slug: NOVAPAY_E2E_WORKSPACE_SLUG },
+  });
+  if (!fixtureWorkspace) {
+    // seedNovaPayE2eFixture (Task B1) must run before this; bail loudly
+    // rather than silently seeding an orphaned rule.
+    console.warn('[NovaPay] Fixture workspace not found — skipping E2E automation');
+    return;
+  }
+
+  const e2eUser = await User.findOne({ where: { email: NOVAPAY_E2E_EMAIL } });
+  if (!e2eUser) {
+    console.warn('[NovaPay] E2E user not found — skipping E2E automation');
+    return;
+  }
+
+  // A self-contained "Transaction Pipeline" board inside the fixture workspace.
+  // The E2E spec (Flow 5) drives Status transitions on this board's items.
+  const [fixtureBoard] = await Board.findOrCreate({
+    where: { workspaceId: fixtureWorkspace.id, name: 'Transaction Pipeline' },
+    defaults: {
+      name: 'Transaction Pipeline',
+      description: 'E2E fixture board — resets between Playwright runs.',
+      workspaceId: fixtureWorkspace.id,
+      createdBy: e2eUser.id,
+      boardType: 'main',
+      settings: { icon: 'credit-card', color: '#2563EB' },
+    },
+  });
+
+  const [statusColumn] = await Column.findOrCreate({
+    where: { boardId: fixtureBoard.id, name: 'Status' },
+    defaults: {
+      boardId: fixtureBoard.id,
+      name: 'Status',
+      columnType: 'status',
+      position: 0,
+      width: 140,
+      config: {
+        options: [
+          { label: 'New', color: '#FCD34D', order: 0 },
+          { label: 'In Progress', color: '#60A5FA', order: 1 },
+          { label: 'Flagged', color: '#F87171', order: 2 },
+          { label: 'Resolved', color: '#34D399', order: 3 },
+        ],
+        default_option: 'New',
+      },
+    },
+  });
+
+  // Idempotency guard — keyed on the semantic shape of the rule, not name.
+  const existing = await Automation.findAll({
+    where: {
+      boardId: fixtureBoard.id,
+      triggerType: 'on_status_changed',
+    },
+  });
+  const alreadySeeded = existing.some((rule) => {
+    const config = rule.triggerConfig as { toStatus?: string; columnId?: number };
+    return config.toStatus === 'Flagged' && config.columnId === statusColumn.id;
+  });
+  if (alreadySeeded) {
+    console.log('[NovaPay] E2E Flagged automation already present — skipping');
+    return;
+  }
+
+  await Automation.create({
+    boardId: fixtureBoard.id,
+    name: 'E2E Fixture — On Status=Flagged → Notify E2E User',
+    triggerType: 'on_status_changed',
+    triggerConfig: {
+      columnId: statusColumn.id,
+      toStatus: 'Flagged',
+      description: 'Flow 5 of Slice 19 E2E suite — fires on any fixture item set to Flagged.',
+    },
+    actionType: 'send_notification',
+    actionConfig: {
+      userId: e2eUser.id,
+      workspaceId: fixtureWorkspace.id,
+      title: 'Item flagged',
+      message: 'A fixture item was flagged and requires review.',
+      type: 'warning',
+    },
+    isActive: true,
+    createdBy: e2eUser.id,
+  });
+
+  console.log(
+    `[NovaPay] Seeded E2E Flagged automation (boardId=${fixtureBoard.id}, userId=${e2eUser.id})`
+  );
 }

@@ -4,7 +4,7 @@ import { seedNovaPayBoards } from './boards';
 import { seedMerchants } from './merchants';
 import { seedTransactions } from './transactions';
 import { seedCompliance } from './compliance';
-import { seedAutomations } from './automations';
+import { seedAutomations, seedNovaPayE2eFlaggedAutomation } from './automations';
 
 export async function seedNovaPay(): Promise<void> {
   console.log('\n========================================');
@@ -29,6 +29,17 @@ export async function seedNovaPay(): Promise<void> {
 
   // Step 5: Create isolated E2E fixture workspace (Slice 19 B1) — idempotent
   await seedNovaPayE2eFixture();
+
+  // Step 6: Seed the Flow 5 Status=Flagged → notification automation into the
+  // fixture workspace (Slice 19 B2). Must run after step 5 so the fixture
+  // workspace + E2E user exist when the rule is wired.
+  //
+  // Guard: older test suites may `jest.mock` the automations module with only
+  // the subset of exports they care about. The guard keeps those mocks working
+  // without forcing updates to unrelated test files.
+  if (typeof seedNovaPayE2eFlaggedAutomation === 'function') {
+    await seedNovaPayE2eFlaggedAutomation();
+  }
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log('\n========================================');
