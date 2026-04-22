@@ -201,6 +201,8 @@ function GroupSection({
                           if (e.key === 'Enter') handleAddItem();
                         }}
                         placeholder="+ Add item"
+                        aria-label={`Add item to ${group.name}`}
+                        data-testid="inline-add-item-input"
                         className="text-sm text-gray-500 outline-none bg-transparent flex-1 placeholder-gray-400"
                       />
                       {newItemName.trim() && (
