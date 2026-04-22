@@ -249,14 +249,14 @@ export function TableView({ board, items, onItemUpdate, onItemCreate, onItemDele
 
   if (groups.length === 0) {
     return (
-      <div className="text-center py-12">
+      <div data-testid="table-view" className="text-center py-12">
         <p className="text-gray-500">No groups configured for this board.</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-2">
+    <div data-testid="table-view" className="space-y-2">
       {groups.map((group) => (
         <GroupSection
           key={group.id}

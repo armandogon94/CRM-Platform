@@ -56,7 +56,7 @@ export function KanbanView({ board, items, onItemCreate }: KanbanViewProps) {
   });
 
   return (
-    <div className="flex gap-4 overflow-x-auto pb-4 min-h-[400px]">
+    <div data-testid="kanban-view" className="flex gap-4 overflow-x-auto pb-4 min-h-[400px]">
       {uncategorized.length > 0 && (
         <KanbanLane
           label="Uncategorized"
