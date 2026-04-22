@@ -12,7 +12,6 @@
     "allowSyntheticDefaultImports": true,
     "types": ["node", "@playwright/test"]
   },
-  "files": ["node_modules/@playwright/test/index.d.ts"],
   "include": ["**/*.ts"],
   "exclude": ["node_modules", "playwright-report", "results", "test-results"]
 }
