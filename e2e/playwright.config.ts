@@ -106,17 +106,28 @@ export default defineConfig({
       },
     },
     {
-      // Mobile-specific testMatch filtering will be tightened in Task F1;
-      // for C2 the project runs every spec in ./specs. Flow 6 is
-      // desktop-only (branding assertions don't benefit from mobile
-      // emulation), so it's excluded here as well.
+      // Slice 19 F1: mobile coverage is intentionally narrow. Per SPEC
+      // §Slice 19 Mobile scope, only flows 1 (login+board), 3 (column
+      // value edit + WS) and 4 (all 8 views mount) run on iPhone 14 Pro.
+      // Flows 2 (item CRUD realtime) and 5 (automation notification) are
+      // desktop-only for this slice, and Flow 6 (branding) belongs to
+      // `desktop-branding-all`. The regex anchors on the filename prefix
+      // `01-`, `03-`, or `04-` so additions like `02-`, `05-`, `06-` are
+      // automatically excluded without further config changes.
+      //
+      // actionTimeout is raised to 15s because iPhone 14 Pro emulation
+      // (CPU throttle + smaller viewport causing layout reflow) is
+      // measurably slower than Desktop Chrome for click/fill actions
+      // against the same DOM. navigationTimeout stays at the 15s
+      // inherited from the global `use` block.
       name: 'mobile-novapay',
       dependencies: ['setup'],
-      testIgnore: /06-branding-per-industry\.spec\.ts$/,
+      testMatch: /0(1|3|4)-.*\.spec\.ts$/,
       use: {
         ...devices['iPhone 14 Pro'],
         baseURL: NOVAPAY_BASE_URL,
         storageState: NOVAPAY_AUTH_STATE,
+        actionTimeout: 15_000,
       },
     },
   ],
