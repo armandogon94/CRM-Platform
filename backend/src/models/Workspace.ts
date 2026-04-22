@@ -8,13 +8,14 @@ export interface WorkspaceAttributes {
   description: string | null;
   settings: Record<string, unknown>;
   createdBy: number | null;
+  isE2eFixture: boolean;
   createdAt?: Date;
   updatedAt?: Date;
   deletedAt?: Date | null;
 }
 
 export interface WorkspaceCreationAttributes
-  extends Optional<WorkspaceAttributes, 'id' | 'description' | 'settings' | 'createdBy' | 'createdAt' | 'updatedAt' | 'deletedAt'> {}
+  extends Optional<WorkspaceAttributes, 'id' | 'description' | 'settings' | 'createdBy' | 'isE2eFixture' | 'createdAt' | 'updatedAt' | 'deletedAt'> {}
 
 class Workspace extends Model<WorkspaceAttributes, WorkspaceCreationAttributes> implements WorkspaceAttributes {
   declare id: number;
@@ -23,6 +24,7 @@ class Workspace extends Model<WorkspaceAttributes, WorkspaceCreationAttributes> 
   declare description: string | null;
   declare settings: Record<string, unknown>;
   declare createdBy: number | null;
+  declare isE2eFixture: boolean;
   declare readonly createdAt: Date;
   declare readonly updatedAt: Date;
   declare readonly deletedAt: Date | null;
@@ -56,6 +58,12 @@ Workspace.init(
       type: DataTypes.INTEGER,
       allowNull: true,
       field: 'created_by',
+    },
+    isE2eFixture: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: 'is_e2e_fixture',
     },
   },
   {
