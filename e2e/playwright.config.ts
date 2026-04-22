@@ -30,10 +30,10 @@ export default defineConfig({
   // Fail the build on test.only leftovers in CI.
   forbidOnly: !!process.env.CI,
 
-  // TODO(Slice 19 C3): wire globalSetup and globalTeardown once the
-  // auth.setup.ts / reset-before-suite helpers land.
-  // globalSetup: require.resolve('./globalSetup'),
-  // globalTeardown: require.resolve('./globalTeardown'),
+  // Reset the fixture workspace once before the whole suite runs.
+  // globalTeardown is not wired yet — added in a later slice if needed;
+  // individual specs are expected to clean up any rows they create.
+  globalSetup: require.resolve('./globalSetup'),
 
   // Reporters: JUnit for CI ingestion, HTML for local triage, list for stdout.
   reporter: [
