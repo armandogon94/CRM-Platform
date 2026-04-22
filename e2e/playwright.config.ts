@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import path from 'node:path';
 
 /**
  * Playwright configuration for the CRM Platform E2E suite (Slice 19 C2).
@@ -16,6 +17,10 @@ import { defineConfig, devices } from '@playwright/test';
 
 // NovaPay frontend baseURL (see frontends/_shared/src/theme.ts — port 13001).
 const NOVAPAY_BASE_URL = 'http://localhost:13001';
+
+// Path where auth.setup.ts persists session state; consumed by the main
+// projects via `use.storageState`. Lives outside git (see e2e/.gitignore).
+const NOVAPAY_AUTH_STATE = path.resolve(__dirname, '.auth/novapay.json');
 
 export default defineConfig({
   testDir: './specs',
@@ -54,11 +59,27 @@ export default defineConfig({
 
   projects: [
     {
-      name: 'desktop-novapay',
+      // Slice 19 C4: runs auth.setup.ts once before any main project,
+      // persisting storageState to `.auth/novapay.json`. testDir '.'
+      // scopes the setup project to the repo-root-level setup file,
+      // leaving testDir './specs' untouched for real specs.
+      name: 'setup',
+      testDir: '.',
+      testMatch: /auth\.setup\.ts$/,
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 1440, height: 900 },
         baseURL: NOVAPAY_BASE_URL,
+      },
+    },
+    {
+      name: 'desktop-novapay',
+      dependencies: ['setup'],
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1440, height: 900 },
+        baseURL: NOVAPAY_BASE_URL,
+        storageState: NOVAPAY_AUTH_STATE,
       },
     },
     {
@@ -66,19 +87,23 @@ export default defineConfig({
       // across all 10 industry frontends (ports 13001-13010). For C2 this
       // project name simply needs to exist so --list reports it.
       name: 'desktop-branding-all',
+      dependencies: ['setup'],
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 1440, height: 900 },
         baseURL: NOVAPAY_BASE_URL,
+        storageState: NOVAPAY_AUTH_STATE,
       },
     },
     {
       // Mobile-specific testMatch filtering will be tightened in Task F1;
       // for C2 the project runs every spec in ./specs.
       name: 'mobile-novapay',
+      dependencies: ['setup'],
       use: {
         ...devices['iPhone 14 Pro'],
         baseURL: NOVAPAY_BASE_URL,
+        storageState: NOVAPAY_AUTH_STATE,
       },
     },
   ],
