@@ -1,0 +1,28 @@
+# docker-compose.e2e.yml
+#
+# E2E overlay for Slice 19. Merge with the base compose:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.e2e.yml up
+#
+# Scope (backend service only):
+#   1. Expose /api/v1/admin/e2e/reset by flipping NODE_ENV=test and
+#      E2E_RESET_ENABLED=true. The route's env guard (Task A4) returns 404
+#      when NODE_ENV === 'production' OR E2E_RESET_ENABLED !== 'true', so
+#      this pair together opens it for the e2e suite.
+#   2. Replace the uploads directory with a tmpfs mount so each e2e run
+#      starts with an empty /app/uploads. The base compose bind-mounts
+#      ./backend:/app, which would otherwise persist uploaded files on
+#      the host across runs (UPLOAD_DIR=./uploads in backend/.env.example
+#      resolves to /app/uploads inside the container).
+#
+# Nothing else is overridden: postgres, redis, all 10 industry frontends,
+# and every other backend env var (DATABASE_URL, REDIS_URL, JWT secrets,
+# CORS_ORIGINS, etc.) remain exactly as defined in docker-compose.yml.
+
+services:
+  backend:
+    environment:
+      NODE_ENV: test
+      E2E_RESET_ENABLED: "true"
+    tmpfs:
+      - /app/uploads
