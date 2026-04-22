@@ -1,5 +1,5 @@
 import { sequelize } from '../../models';
-import { seedNovaPayWorkspace } from './workspace';
+import { seedNovaPayWorkspace, seedNovaPayE2eFixture } from './workspace';
 import { seedNovaPayBoards } from './boards';
 import { seedMerchants } from './merchants';
 import { seedTransactions } from './transactions';
@@ -26,6 +26,9 @@ export async function seedNovaPay(): Promise<void> {
 
   // Step 4: Create automation rules
   await seedAutomations(ctx, boards);
+
+  // Step 5: Create isolated E2E fixture workspace (Slice 19 B1) — idempotent
+  await seedNovaPayE2eFixture();
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log('\n========================================');
