@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Playwright auth storage state — MUST NEVER be committed (security boundary)
+.auth/
+
+# Test outputs
+results/
+playwright-report/
+test-results/
+
+# Logs
+*.log
