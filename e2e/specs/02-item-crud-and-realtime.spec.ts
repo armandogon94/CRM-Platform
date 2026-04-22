@@ -92,6 +92,7 @@ test.describe('Flow 2 — item CRUD and realtime propagation', () => {
   test('primary context creates item; secondary context receives item:created WS event and renders it', async ({
     page,
     browser,
+    a11yScan,
   }) => {
     // --- 1. Navigate to the Transaction Pipeline board (same pattern as D1). ---
     await page.goto('/');
@@ -112,6 +113,11 @@ test.describe('Flow 2 — item CRUD and realtime propagation', () => {
     await expect(
       page.getByRole('heading', { level: 1, name: 'Transaction Pipeline' })
     ).toBeVisible();
+
+    // A11y audit — BoardPage fully rendered before any mutation. Scan
+    // pre-CRUD so the baseline is "board at rest with seeded state",
+    // not a transient mid-action DOM. Slice 19 E2.
+    await a11yScan();
 
     const boardPath = new URL(page.url()).pathname;
     const boardIdMatch = boardPath.match(/\/boards\/(\d+)/);

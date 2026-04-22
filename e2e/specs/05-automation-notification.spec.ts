@@ -33,6 +33,7 @@ const ITEM_NAME = `E2E Flow 5 Item ${Date.now()}`;
 test.describe('Flow 5 — automation triggers in-app notification', () => {
   test('Status → Flagged emits notification within 3s and surfaces in the bell dropdown', async ({
     page,
+    a11yScan,
   }) => {
     // 1. Open the fixture "Transaction Pipeline" board (Flow 1 path).
     await page.goto('/');
@@ -44,6 +45,13 @@ test.describe('Flow 5 — automation triggers in-app notification', () => {
     await expect(
       page.getByRole('heading', { level: 1, name: 'Transaction Pipeline' })
     ).toBeVisible();
+
+    // A11y audit — BoardPage fully rendered before we drive the
+    // automation. Scanning now (rather than after the notification
+    // toast opens) keeps the assertion focused on the stable board
+    // shell; the popover itself is transient and has its own mount
+    // proof via the unread-badge poll below. Slice 19 E2.
+    await a11yScan();
 
     // 2. Pre-condition: create a fresh item with Status set to a NON-Flagged
     //    value. We set it to "In Progress" so the subsequent transition to

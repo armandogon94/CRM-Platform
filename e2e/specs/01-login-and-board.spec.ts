@@ -22,6 +22,7 @@ import { test, expect } from '../fixtures/test';
 test.describe('Flow 1 — login and open board', () => {
   test('lands on BoardListPage and opens the Transaction Pipeline board', async ({
     page,
+    a11yScan,
   }) => {
     // Enter the app. The persisted session short-circuits the login
     // form and react-router lands us at /boards.
@@ -33,6 +34,11 @@ test.describe('Flow 1 — login and open board', () => {
     await expect(
       page.getByRole('heading', { level: 1, name: 'Boards' })
     ).toBeVisible();
+
+    // A11y audit #1 — BoardListPage post-render. The heading assertion
+    // above proves the list has fully mounted, so the scan sees the
+    // final DOM (not a loading state). Slice 19 E2.
+    await a11yScan();
 
     // The seeded board renders as an interactive card (a <button>
     // styled as a card — see BoardListPage.tsx). Scope to the main
@@ -55,5 +61,10 @@ test.describe('Flow 1 — login and open board', () => {
     // Sanity: the board toolbar is interactive (confirms the board
     // view fully mounted, not a loading or error state).
     await expect(page.getByRole('button', { name: 'New Item' })).toBeVisible();
+
+    // A11y audit #2 — BoardPage post-mount. The "New Item" toolbar
+    // button being visible is our deterministic render proof (same
+    // check the Flow 4 setup relies on). Slice 19 E2.
+    await a11yScan();
   });
 });

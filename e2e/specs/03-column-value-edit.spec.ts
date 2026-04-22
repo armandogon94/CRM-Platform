@@ -204,6 +204,7 @@ test.describe('Flow 3 — edit a column value and observe WS propagation', () =>
   test('changes a status cell, persists across reload, and propagates via WebSocket', async ({
     page,
     browser,
+    a11yScan,
   }) => {
     // Open a second subscribed context BEFORE the mutation so the
     // socket.io join-room handshake has time to complete and is ready
@@ -225,6 +226,12 @@ test.describe('Flow 3 — edit a column value and observe WS propagation', () =>
       // that render "New" elsewhere on the page) cannot match.
       const itemRow = page.getByRole('row', { name: new RegExp(fixture.itemName) });
       await expect(itemRow).toBeVisible();
+
+      // A11y audit — BoardPage in Table view with the provisioned item
+      // visible. Running before the cell-edit flow means the scan sees
+      // the resting TableView DOM, not a transient ColumnEditor popover
+      // or a post-reload intermediate state. Slice 19 E2.
+      await a11yScan();
 
       // Status cell starts at the column-config default_option ("New" —
       // seeded in backend/src/seeds/novapay/automations.ts). Clicking

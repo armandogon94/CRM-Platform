@@ -100,6 +100,7 @@ const DATA_URL_PATTERN = /\/items|\/aggregates|\/boards\//;
 test.describe('Flow 4 — all 8 views mount cleanly', () => {
   test('switches through Table/Kanban/Calendar/Timeline/Chart/Form/Dashboard/Map without console or page errors', async ({
     page,
+    a11yScan,
   }) => {
     // Attach listeners BEFORE any navigation so errors raised during initial
     // board load are captured the same way as errors during view switching.
@@ -155,6 +156,15 @@ test.describe('Flow 4 — all 8 views mount cleanly', () => {
         }
 
         await expect(view.locate(page)).toBeVisible();
+      });
+
+      // A11y scan in its OWN step so a violation is attributed to the
+      // view we just switched to (the step name carries the view label
+      // into the failure report). Running after the visibility gate
+      // above guarantees the view is fully mounted — no data fetch or
+      // loading spinner is mid-flight. Slice 19 E2.
+      await test.step(`a11y ${view.label}`, async () => {
+        await a11yScan();
       });
     }
 
