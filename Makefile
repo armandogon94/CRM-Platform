@@ -4,9 +4,13 @@
 # Targets:
 #   e2e          Full suite: postgres + redis + backend + all 10 frontends,
 #                then `npx playwright test` (all projects).
-#   e2e:desktop  postgres + redis + backend + 10 frontends, desktop projects only.
-#   e2e:mobile   postgres + redis + backend + novapay-frontend, mobile project only.
-#   e2e:ui       Playwright UI mode. Assumes stack is already running; no teardown.
+#   e2e-desktop  postgres + redis + backend + 10 frontends, desktop projects only.
+#   e2e-mobile   postgres + redis + backend + novapay-frontend, mobile project only.
+#   e2e-ui       Playwright UI mode. Assumes stack is already running; no teardown.
+#
+# (Hyphenated variants replace the earlier colon-separated names — see
+#  Slice 19 review fixes for rationale: colon-escaping breaks tab-completion
+#  and IDE make-integrations.)
 #
 # All docker-compose recipes trap EXIT/INT/TERM and run `docker compose ... down -v`,
 # which wipes containers AND the postgres volume. Each run starts from a clean DB —
@@ -34,7 +38,7 @@ INDUSTRY_FRONTENDS := \
 	cranestack-frontend \
 	edupulse-frontend
 
-.PHONY: e2e e2e\:desktop e2e\:mobile e2e\:ui
+.PHONY: e2e e2e-desktop e2e-mobile e2e-ui
 
 e2e:
 	@set -e; \
@@ -49,7 +53,7 @@ e2e:
 	$(COMPOSE) up -d $(INDUSTRY_FRONTENDS); \
 	cd e2e && npx playwright test
 
-e2e\:desktop:
+e2e-desktop:
 	@set -e; \
 	trap '$(COMPOSE) down -v' EXIT INT TERM; \
 	$(COMPOSE) up -d --wait postgres redis; \
@@ -62,7 +66,7 @@ e2e\:desktop:
 	$(COMPOSE) up -d $(INDUSTRY_FRONTENDS); \
 	cd e2e && npx playwright test --project=desktop-novapay --project=desktop-branding-all
 
-e2e\:mobile:
+e2e-mobile:
 	@set -e; \
 	trap '$(COMPOSE) down -v' EXIT INT TERM; \
 	$(COMPOSE) up -d --wait postgres redis; \
@@ -76,5 +80,5 @@ e2e\:mobile:
 	cd e2e && npx playwright test --project=mobile-novapay
 
 # UI mode: assumes the stack is already running. NO teardown.
-e2e\:ui:
+e2e-ui:
 	cd e2e && npx playwright test --ui

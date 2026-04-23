@@ -210,10 +210,20 @@ export async function seedNovaPayE2eFlaggedAutomation(): Promise<void> {
       triggerType: 'on_status_changed',
     },
   });
-  const alreadySeeded = existing.some((rule) => {
-    const config = rule.triggerConfig as { toStatus?: string; columnId?: number };
-    return config.toStatus === 'Flagged' && config.columnId === statusColumn.id;
-  });
+
+  /**
+   * Narrowing helper so the idempotency guard doesn't silently misread
+   * a future trigger-config schema change. If the JSONB shape ever
+   * evolves (e.g. `toStatus` renamed to `toValue`) this check will
+   * return false for every row, re-seed will run, and the unique-ish
+   * automation will appear twice — easy to spot vs. a silent no-op.
+   */
+  const isFlaggedRule = (raw: unknown): boolean => {
+    if (raw === null || typeof raw !== 'object') return false;
+    const cfg = raw as Record<string, unknown>;
+    return cfg.toStatus === 'Flagged' && cfg.columnId === statusColumn.id;
+  };
+  const alreadySeeded = existing.some((rule) => isFlaggedRule(rule.triggerConfig));
   if (alreadySeeded) {
     console.log('[NovaPay] E2E Flagged automation already present — skipping');
     return;

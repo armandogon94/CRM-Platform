@@ -99,8 +99,15 @@ export async function seedNovaPayWorkspace(): Promise<NovaPayContext> {
 export async function seedNovaPayE2eFixture(): Promise<NovaPayE2eFixtureContext> {
   console.log('[NovaPay] Seeding E2E fixture workspace and user...');
 
+  // paranoid: false — if a previous run soft-deleted the fixture row,
+  // INSERT-ing a new one would collide on the unique slug constraint.
+  // Instead we find-or-create including soft-deleted rows and restore
+  // below if needed. The duplicate `isE2eFixture` inside `settings` JSON
+  // was review-fix S5-dropped — the top-level column is the only source
+  // of truth (queryable and typed).
   const [workspace] = await Workspace.findOrCreate({
     where: { slug: NOVAPAY_E2E_WORKSPACE_SLUG },
+    paranoid: false,
     defaults: {
       name: 'NovaPay E2E Fixture',
       slug: NOVAPAY_E2E_WORKSPACE_SLUG,
@@ -108,18 +115,17 @@ export async function seedNovaPayE2eFixture(): Promise<NovaPayE2eFixtureContext>
       settings: {
         brandColor: '#2563EB',
         industry: 'fintech',
-        isE2eFixture: true,
       },
       isE2eFixture: true,
     },
   });
 
-  // Defensive: if a pre-existing row was returned by slug but the flag drifted,
-  // force it back to true so the E2E reset path always finds it.
-  if (!workspace.isE2eFixture) {
+  // Defensive: restore from soft-delete and re-assert flag in one pass —
+  // handles both "row existed with flag drifted" and "row was soft-deleted".
+  if (!workspace.isE2eFixture || workspace.deletedAt != null) {
     await Workspace.update(
-      { isE2eFixture: true },
-      { where: { id: workspace.id } }
+      { isE2eFixture: true, deletedAt: null },
+      { where: { id: workspace.id }, paranoid: false }
     );
     workspace.isE2eFixture = true;
   }

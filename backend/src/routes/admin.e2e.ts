@@ -18,8 +18,21 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth';
 import E2EResetService from '../services/E2EResetService';
+import { seedNovaPayE2eFixture } from '../seeds/novapay/workspace';
+import { seedNovaPayE2eFlaggedAutomation } from '../seeds/novapay/automations';
 import { logger } from '../utils/logger';
 import { ApiResponse } from '../types';
+
+/**
+ * Re-populates the fixture workspace after the service has cascade-deleted
+ * its rows. Without this, subsequent /reset calls within a single container
+ * lifecycle would leave the fixture empty and downstream specs would fail
+ * at "board not found". Runs inside the same transaction as the destroys.
+ */
+async function rebuildFixture(): Promise<void> {
+  await seedNovaPayE2eFixture();
+  await seedNovaPayE2eFlaggedAutomation();
+}
 
 /**
  * Env-guard middleware. Must come BEFORE `authenticate` so unauthenticated
@@ -45,7 +58,7 @@ const router = Router();
 
 router.post('/reset', e2eEnvGuard, authenticate, async (_req, res) => {
   try {
-    const result = await E2EResetService.reset();
+    const result = await E2EResetService.reset({ reseed: rebuildFixture });
     res.status(200).json({
       ok: true,
       workspaceId: result?.workspaceId ?? null,

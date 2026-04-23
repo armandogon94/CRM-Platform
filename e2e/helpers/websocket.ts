@@ -22,7 +22,16 @@ import type { Browser, BrowserContext, Page } from '@playwright/test';
  * so we catch frames emitted by the frontend's own socket.io-client
  * without injecting scripts. Socket.io v4 wraps messages in an
  * engine.io packet of the form `4<sioPacketType><JSON…>`; we only
- * decode the common message packet (engine.io type 4, sio type 2).
+ * decode the common message packet (engine.io type 4, sio type 2,
+ * wire prefix `42`).
+ *
+ * Scope — known unsupported:
+ *   - Binary attachments (sio types 5/6, prefix `45`/`46`) — decoder
+ *     drops them. Slice 19 flows are plain JSON (item:created,
+ *     column_value:changed, etc.), so this is intentional.
+ *   - ACK packets (sio type 3, prefix `43`) — also dropped. No Slice 19
+ *     spec expects an ack-shaped event.
+ * If a future spec needs either, extend the regex + add a handler.
  */
 
 const DEFAULT_AUTH_STATE = path.resolve(__dirname, '../.auth/novapay.json');

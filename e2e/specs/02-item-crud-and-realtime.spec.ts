@@ -39,7 +39,11 @@ import { websocketClient } from '../helpers/websocket';
 const ITEM_NAME = 'E2E Test Deal';
 const API_BASE_URL =
   process.env.E2E_API_BASE_URL ?? 'http://localhost:13000/api/v1';
-const TOKEN_KEY = 'crm_access_token';
+// NovaPay's frontend keeps its own api.ts (frontends/novapay/src/utils/api.ts)
+// that persists the JWT under `novapay_token`, NOT the shared default
+// `crm_access_token`. D3's spec already uses the correct key; this must
+// match so the /auth/me cleanup call in this spec actually carries a token.
+const TOKEN_KEY = 'novapay_token';
 
 // Shape of the `item:created` WS payload — `ItemService.getById()`
 // returns the full item including id/name (see ItemService.ts L281-282).

@@ -73,6 +73,17 @@ export default defineConfig({
       },
     },
     {
+      // Slice 19 E1 review-fix (S1): make the a11y helper's unit test
+      // actually discoverable. testDir './helpers/__tests__' scopes this
+      // project to helper-only tests so the main specs/ directory stays
+      // focused on user-facing flows. These tests don't need a running
+      // app — they use page.setContent() with handcrafted HTML.
+      name: 'helpers',
+      testDir: './helpers/__tests__',
+      testMatch: /.*\.spec\.ts$/,
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
       name: 'desktop-novapay',
       dependencies: ['setup'],
       // Flow 6 is owned by `desktop-branding-all`, which runs pre-auth

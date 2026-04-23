@@ -67,9 +67,14 @@ export class E2EResetService {
     const reseed = options.reseed ?? this.defaultReseed;
 
     return sequelize.transaction(async (tx) => {
+      // paranoid: false so a previously soft-deleted fixture is still
+      // matched. Without this the reset would silently become a no-op
+      // if someone ever (accidentally or via an admin action) soft-
+      // deleted the fixture workspace row.
       const fixture = await Workspace.findOne({
         where: { isE2eFixture: true },
         transaction: tx,
+        paranoid: false,
       });
       if (!fixture) return null;
 

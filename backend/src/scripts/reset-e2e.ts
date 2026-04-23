@@ -18,6 +18,19 @@
  */
 
 import e2eResetService from '../services/E2EResetService';
+import { seedNovaPayE2eFixture } from '../seeds/novapay/workspace';
+import { seedNovaPayE2eFlaggedAutomation } from '../seeds/novapay/automations';
+
+/**
+ * Re-seed the fixture workspace after the destructive phase so the CLI
+ * path leaves behind the same state the HTTP route does (Task A4 + C1
+ * review-fix). Without this, `npm run reset:e2e` would leave the
+ * workspace existing but empty.
+ */
+async function rebuildFixture(): Promise<void> {
+  await seedNovaPayE2eFixture();
+  await seedNovaPayE2eFlaggedAutomation();
+}
 
 export async function main(): Promise<void> {
   if (process.env.NODE_ENV === 'production') {
@@ -27,7 +40,7 @@ export async function main(): Promise<void> {
     throw new Error(message);
   }
 
-  const result = await e2eResetService.reset();
+  const result = await e2eResetService.reset({ reseed: rebuildFixture });
 
   if (result === null) {
     process.stdout.write(

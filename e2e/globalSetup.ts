@@ -25,7 +25,10 @@ import type { FullConfig } from '@playwright/test';
 
 const BACKEND_URL = process.env.BACKEND_URL ?? 'http://localhost:13000';
 const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? 'admin@crm-platform.com';
-const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? 'admin';
+// No fallback — require the password via env so a silent password drift in
+// the seed never surfaces as a confusing "login failed" 500 pages later.
+// Local runs: export E2E_ADMIN_PASSWORD=admin  (the seeded dev password).
+const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD;
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_ATTEMPTS = 3;
 const BACKOFF_MS = 2_000;
@@ -49,6 +52,13 @@ async function fetchWithTimeout(
 }
 
 async function loginAsAdmin(): Promise<string> {
+  if (!ADMIN_PASSWORD) {
+    throw new Error(
+      '[globalSetup] E2E_ADMIN_PASSWORD env var is required. ' +
+        'Local runs: `export E2E_ADMIN_PASSWORD=admin` (the seeded dev password).'
+    );
+  }
+
   const res = await fetchWithTimeout(
     `${BACKEND_URL}/api/v1/auth/login`,
     {
