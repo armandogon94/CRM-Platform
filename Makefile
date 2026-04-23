@@ -1,4 +1,4 @@
-# Makefile — Slice 19 G2 + Slice 19B C1
+# Makefile — Slice 19 G2 + Slice 19B C1 + Slice 19C G1
 # Playwright E2E orchestration via docker compose overlay.
 #
 # Targets:
@@ -14,6 +14,19 @@
 #   e2e-visual-ui       Boots visual stack and prints Playwright UI-mode instructions;
 #                       NO teardown — developer is expected to tear down manually.
 #
+# Slice 19C perf targets (activate docker-compose.perf.yml overlay with `--profile perf`):
+#   e2e-perf            Full happy path: perf stack up → /health wait → seed-perf →
+#                       build + run orchestrator (all 4 scenarios) → trap-based teardown.
+#   e2e-perf-seed-only  Boots perf stack, seeds crm_perf, leaves stack running (dev debug).
+#                       NO teardown — tear down manually with `make e2e-perf-teardown`.
+#   e2e-perf-scenario   Runs a single scenario (NAME=a|b|c|d) against an ALREADY-RUNNING
+#                       perf stack with `--short`. No startup, no teardown.
+#   e2e-perf-set-baseline
+#                       Interactive `[y/N]` prompt; copies the newest report in
+#                       e2e/perf/results/ to baseline.md. Never auto-commits.
+#   e2e-perf-teardown   Stops perf profile and wipes postgres + redis volumes
+#                       (drops crm_perf DB and flushes Redis db 1 via volume wipe).
+#
 # (Hyphenated variants replace the earlier colon-separated names — see
 #  Slice 19 review fixes for rationale: colon-escaping breaks tab-completion
 #  and IDE make-integrations.)
@@ -28,6 +41,7 @@
 SHELL := /bin/bash
 
 COMPOSE := docker compose -f docker-compose.yml -f docker-compose.e2e.yml
+COMPOSE_PERF := docker compose -f docker-compose.yml -f docker-compose.perf.yml
 HEALTH_URL := http://localhost:13000/health
 WAIT_SECS := 30
 
@@ -44,7 +58,8 @@ INDUSTRY_FRONTENDS := \
 	cranestack-frontend \
 	edupulse-frontend
 
-.PHONY: e2e e2e-desktop e2e-mobile e2e-ui e2e-visual e2e-visual-update e2e-visual-ui
+.PHONY: e2e e2e-desktop e2e-mobile e2e-ui e2e-visual e2e-visual-update e2e-visual-ui \
+	e2e-perf e2e-perf-seed-only e2e-perf-scenario e2e-perf-set-baseline e2e-perf-teardown
 
 e2e:
 	@set -e; \
@@ -168,3 +183,88 @@ e2e-visual-ui:
 	echo "  docker compose -f docker-compose.yml -f docker-compose.e2e.yml \\"; \
 	echo "    --profile visual down --volumes"; \
 	echo "────────────────────────────────────────────────────────────────"
+
+# ─── Slice 19C: Performance suite targets ───────────────────────────────────
+#
+# These targets activate the `perf` profile of docker-compose.perf.yml
+# (Slice 19C C1), which layers resource limits, compiled-mode backend,
+# Redis db 1, and the crm_perf database over the base compose. The suite
+# runs Artillery scenarios (Slice 19C E1–E4) orchestrated by e2e/perf/run.ts
+# (F1) after a 5-minute seed (B2).
+#
+# All perf targets assume the perf overlay is the ONLY way the perf stack
+# starts — `--profile perf` is mandatory. Without it, the overlay's
+# service gates emit dependency errors by design (safety signal).
+#
+# The full target (`e2e-perf`) traps EXIT/INT/TERM and tears the stack
+# down with `down -v`, which wipes BOTH the postgres volume (drops
+# crm_perf DB) and the redis volume (flushes db 1). Developer debug
+# targets (`e2e-perf-seed-only`, `e2e-perf-scenario`) deliberately omit
+# teardown so the stack can be inspected between runs.
+
+# Full happy path. Builds the orchestrator, runs all 4 scenarios, tears
+# down on any exit path. Budget: ~30 min on commodity hardware.
+e2e-perf:
+	@set -e; \
+	trap '$(COMPOSE_PERF) --profile perf down -v' EXIT INT TERM; \
+	$(COMPOSE_PERF) --profile perf up -d --wait postgres redis; \
+	$(COMPOSE_PERF) --profile perf up -d backend; \
+	for i in $$(seq 1 $(WAIT_SECS)); do \
+		if curl -sfS $(HEALTH_URL) >/dev/null 2>&1; then break; fi; \
+		sleep 1; \
+	done; \
+	curl -sfS $(HEALTH_URL) >/dev/null || { echo "backend /health never came up"; exit 1; }; \
+	$(COMPOSE_PERF) --profile perf exec -T backend npm run seed:perf; \
+	(cd e2e/perf && npm run build && node dist/run.js)
+
+# Developer debug: boots the perf stack, runs the seeder, THEN STOPS.
+# No orchestrator run, no teardown. The developer is responsible for
+# cleanup via `make e2e-perf-teardown` (or plain docker compose down).
+e2e-perf-seed-only:
+	@set -e; \
+	$(COMPOSE_PERF) --profile perf up -d --wait postgres redis; \
+	$(COMPOSE_PERF) --profile perf up -d backend; \
+	for i in $$(seq 1 $(WAIT_SECS)); do \
+		if curl -sfS $(HEALTH_URL) >/dev/null 2>&1; then break; fi; \
+		sleep 1; \
+	done; \
+	curl -sfS $(HEALTH_URL) >/dev/null || { echo "backend /health never came up"; exit 1; }; \
+	$(COMPOSE_PERF) --profile perf exec -T backend npm run seed:perf; \
+	echo ""; \
+	echo "────────────────────────────────────────────────────────────────"; \
+	echo "Stack running with perf seed. Tear down manually: make e2e-perf-teardown"; \
+	echo "────────────────────────────────────────────────────────────────"
+
+# Runs ONE scenario (NAME=a|b|c|d) against an already-running perf stack.
+# Uses run.ts's `--scenarios=<id>` and `--short` flags so the scenario
+# executes its short YAML environment (fast smoke, not the full profile).
+# NO startup, NO teardown — caller is expected to have the stack up.
+e2e-perf-scenario:
+	@test "$(NAME)" = "a" || test "$(NAME)" = "b" || test "$(NAME)" = "c" || test "$(NAME)" = "d" || \
+		(echo "NAME must be a, b, c, or d (got \"$(NAME)\")"; exit 1)
+	@set -e; \
+	(cd e2e/perf && npm run build && node dist/run.js --scenarios=$(NAME) --short)
+
+# Interactive baseline refresh. Prompts `[y/N]`; on `y`/`Y`, copies the
+# newest markdown report in e2e/perf/results/ to baseline.md. Never
+# auto-commits — the user reviews the diff and commits manually per
+# SPEC §Slice 19C "baseline.md updated manually — never auto-updated."
+e2e-perf-set-baseline:
+	@read -p "Copy latest result to baseline.md? [y/N] " reply; \
+	case "$$reply" in \
+		y|Y) \
+			latest=$$(ls -t e2e/perf/results/*.md 2>/dev/null | grep -v '/baseline.md$$' | head -1); \
+			if [ -z "$$latest" ]; then \
+				echo "No result markdown files found in e2e/perf/results/."; \
+				exit 1; \
+			fi; \
+			cp "$$latest" e2e/perf/results/baseline.md; \
+			echo "Baseline updated from $$latest. Review the diff and commit manually." ;; \
+		*) echo "Aborted." ;; \
+	esac
+
+# Stops the perf profile and wipes volumes. `down -v` removes the
+# postgres volume (dropping crm_perf) and the redis volume (flushing
+# db 1) in one shot — explicit SQL DROP / FLUSHDB would be redundant.
+e2e-perf-teardown:
+	$(COMPOSE_PERF) --profile perf down -v
