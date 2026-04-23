@@ -7,6 +7,7 @@ node_modules/
 # Test outputs
 results/
 playwright-report/
+playwright-report-visual/
 test-results/
 
 # Logs
