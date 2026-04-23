@@ -917,6 +917,458 @@ interface ThemeConfig {
 
 ---
 
+### Phase 5: Quality Assurance & E2E Testing
+
+#### Slice 19: End-to-End Testing with Playwright (Size: XL)
+
+**Objective:** Validate that the 10-industry CRM works end-to-end across real browser + backend + PostgreSQL + Redis + Socket.io. Cover critical user flows, catch accessibility regressions, and smoke-test mobile. Establish a deterministic E2E foundation that future slices (19B visual regression, 19C load/perf) will extend.
+
+**Prerequisite:** Slices 1–18 complete (current state).
+
+**DB changes:**
+- Add `is_e2e_fixture BOOLEAN NOT NULL DEFAULT false` column to `workspaces` table to flag the dedicated E2E workspace for safe teardown.
+- New migration: `YYYYMMDDHHMMSS-add-e2e-fixture-flag-to-workspaces.ts`.
+
+**API changes (dev/test env only):**
+- New route `POST /api/v1/admin/e2e/reset` — wipes + reseeds the E2E workspace only.
+  - Guard: returns `404` when `NODE_ENV === 'production'` OR `process.env.E2E_RESET_ENABLED !== 'true'`.
+  - Logic: cascade-delete items, column values, columns, groups, boards WHERE `workspace.is_e2e_fixture = true`; reseed NovaPay templates + seeded automation rule into that workspace.
+- Confirm `GET /health` exists and returns `{ status, db, redis }` (add if missing).
+
+**New CLI script:**
+- `backend/src/scripts/reset-e2e.ts` — same reset logic, invokable via `npm run reset:e2e`. Used when the HTTP surface should be closed or for ad-hoc debugging.
+- Both paths call the same `E2EResetService.reset()` — single source of truth.
+
+**Tooling (new):**
+- `e2e/` top-level directory (sibling to `backend/`, `frontend/`, `frontends/`).
+- Dependencies: `@playwright/test@^1.48`, `@axe-core/playwright@^4.10`.
+- Playwright projects:
+  - `desktop-novapay` — flows (1)–(5) on chromium @ 1440×900
+  - `desktop-branding-all` — flow (6) parameterized across all 10 industries on chromium
+  - `mobile-novapay` — flows (1), (3), (4) on `devices['iPhone 14 Pro']`
+- Reporters: `junit` (CI handoff) + `html` (local) + `list` (console).
+- Trace: `on-first-retry`; video: `retain-on-failure`; screenshot: `only-on-failure`.
+
+**Test data strategy (decided):**
+- Dedicated E2E workspace via `is_e2e_fixture = true` flag — **not** a separate database.
+- Rationale: (1) single-DB operational simplicity, (2) multi-tenant isolation already proven by existing tests, (3) ~30s faster per run than full reseed, (4) dev seed data remains untouched.
+- `globalSetup.ts` calls the reset endpoint once before the suite; individual specs do not reseed.
+- Alternative rejected: separate test database — duplicate migrations, longer startup, no isolation benefit over the workspace flag.
+
+**Auth strategy:**
+- E2E seed creates a fixed user: `e2e@novapay.test` / `e2epassword` in the fixture workspace.
+- `auth.setup.ts` logs in via UI once per Playwright project, saves `storageState` to `e2e/.auth/<industry>.json`.
+- All specs reuse the saved storage state — no per-test login.
+
+**Critical flows (acceptance criteria):**
+1. Login → BoardListPage → open the seeded "Transaction Pipeline" board (NovaPay).
+2. Create item "E2E Test Deal" → appears in Table view → second browser context (`browser.newContext()`) subscribed to the same board receives `item:created` WS event and renders the new item within 2s.
+3. Edit an item's Status column value → persists after page reload → second context receives `column_value:changed` event.
+4. Switch through all 8 board views on the same board (Table, Kanban, Calendar, Timeline, Chart, Form, Dashboard, Map); assert each mounts with zero `console.error` and zero `pageerror` events.
+5. Trigger seeded automation "On Status = Flagged → create notification": change an item's Status to Flagged → `NotificationBell` badge increments from 0 to 1 within 3s.
+6. Branding smoke — parameterized over all 10 industries: log in → sidebar/header element's computed `background-color` equals that industry's primary brand color from `INDUSTRY_THEMES`.
+
+**Accessibility audit:**
+- After each view renders in flows (1)–(5), run `new AxeBuilder({ page }).analyze()`.
+- Fail the test on any `violation` with `impact ∈ {serious, critical}` matching WCAG 2.1 AA.
+- `e2e/a11y-baseline.json` — pre-approved existing violations, each entry: `{ rule, selector, justification, reviewedOn }`. Reviewed quarterly; new violations cannot be added without a human-approved PR touching this file.
+
+**Mobile scope:**
+- Project `mobile-novapay` using `devices['iPhone 14 Pro']` only (Pixel 7 deferred).
+- Runs flows (1), (3), (4).
+- Separate timeouts/viewport config from desktop.
+
+**Cross-industry scope:**
+- Flows (1)–(5): NovaPay only for Slice 19. Other industries deferred until NovaPay passes cleanly across 3 consecutive runs.
+- Flow (6): all 10 industries via `test.describe.parallel` with parameterized fixture data.
+
+**Docker integration:**
+- New `docker-compose.e2e.yml` overlay — sets `E2E_RESET_ENABLED=true` and `NODE_ENV=test` on the backend; mounts an ephemeral volume for uploads.
+- New Make targets:
+  - `make e2e` — start stack, wait on `/health`, run `npx playwright test`, tear down
+  - `make e2e:desktop` — desktop projects only
+  - `make e2e:mobile` — mobile project only
+  - `make e2e:ui` — Playwright UI mode against an already-running stack (no teardown)
+
+**Determinism requirements:**
+- Forbidden: `page.waitForTimeout(ms)`. Use `locator.waitFor(...)`, `expect(...).toHaveText(...)`, or `page.waitForResponse(...)`.
+- Selector order: `getByRole` → `getByLabel` → `getByTestId`. No raw CSS selectors, no XPath.
+- Seed data uses fixed timestamps (baseline `2026-01-01T00:00:00Z`) and deterministic string IDs where permitted by schema.
+- Tests never depend on ordering from other tests; each spec is independently runnable.
+
+**CI readiness (config only, no pipeline yet):**
+- JUnit XML → `e2e/results/junit.xml`.
+- Non-zero exit on any failure.
+- Parallel-safe with `workers: 4`.
+- `.github/workflows/e2e.yml` is **not** added by this slice — deferred to Slice 20.
+
+**Runtime budget:** < 10 min locally for the full suite (desktop + mobile + branding + a11y combined).
+
+**Files to create:**
+- `e2e/playwright.config.ts`
+- `e2e/globalSetup.ts`
+- `e2e/auth.setup.ts`
+- `e2e/fixtures/test.ts` (base test extending storage state + a11y helper)
+- `e2e/helpers/a11y.ts`
+- `e2e/helpers/websocket.ts` (second browser context helper)
+- `e2e/specs/01-login-and-board.spec.ts`
+- `e2e/specs/02-item-crud-and-realtime.spec.ts`
+- `e2e/specs/03-column-value-edit.spec.ts`
+- `e2e/specs/04-all-eight-views.spec.ts`
+- `e2e/specs/05-automation-notification.spec.ts`
+- `e2e/specs/06-branding-per-industry.spec.ts`
+- `e2e/a11y-baseline.json` (empty on first commit; populated after first run)
+- `e2e/package.json`
+- `e2e/tsconfig.json`
+- `e2e/.gitignore` (ignores `.auth/`, `results/`, `playwright-report/`)
+- `docker-compose.e2e.yml`
+- `backend/src/services/E2EResetService.ts`
+- `backend/src/routes/admin.e2e.ts`
+- `backend/src/scripts/reset-e2e.ts`
+- `backend/src/migrations/YYYYMMDDHHMMSS-add-e2e-fixture-flag-to-workspaces.ts`
+
+**Files to modify:**
+- `Makefile` — add 4 e2e targets
+- `backend/src/app.ts` — mount `admin.e2e` route behind env guard
+- `backend/src/seeds/novapay.ts` — create E2E user, mark its workspace with `is_e2e_fixture: true`, ensure at least one automation rule triggers on Status = Flagged
+- `backend/package.json` — add `reset:e2e` npm script
+- `SPEC.md` — this section
+
+**Out of scope (future slices):**
+- Visual regression / screenshot diffing → Slice 19B
+- Load / performance testing → Slice 19C
+- Firefox and WebKit browser coverage → deferred
+- Flows (1)–(5) against non-NovaPay industries → deferred pending Slice 19 stability
+- GitHub Actions workflow → Slice 20
+
+**Boundaries (slice-specific):**
+- Always: set `E2E_RESET_ENABLED=true` only via `docker-compose.e2e.yml` or local developer env; never in base compose
+- Ask first: adding specs beyond the 6 listed flows
+- Never: run the reset endpoint or script against production; never commit `e2e/.auth/` or `e2e/results/`
+
+**Success criteria (slice-level):**
+- [ ] `make e2e` exits 0 on a clean checkout in < 10 min
+- [ ] All 6 specs pass on 3 consecutive runs with zero flake
+- [ ] `a11y-baseline.json` contains only justified entries (or is empty)
+- [ ] Zero uncaught `console.error` or `pageerror` events across all flows
+- [ ] Dev seed data unchanged by any E2E run (verify by row-count diff on non-E2E workspaces before/after)
+- [ ] `tsc --noEmit` passes in `e2e/` and `backend/`
+
+---
+
+#### Slice 19B: Visual Regression Testing (Size: L)
+
+**Objective:** Catch unintended visual changes across the 10 branded industry frontends via screenshot diffing. Covers branding consistency (primary color, logo placement, spacing) and layout integrity (responsive breakpoints, state variants) without replacing functional E2E tests from Slice 19.
+
+**Prerequisite:** Slice 19 complete — Playwright infra, `e2e/` directory, fixture workspace, and `globalSetup.ts` exist.
+
+**Decision (ADR): Playwright-native `toHaveScreenshot()`**
+
+| Criterion | Playwright-native | Percy | Chromatic |
+|-----------|------------------|-------|-----------|
+| Cost | Free (OSS) | Paid after free tier | Paid after free tier |
+| Baseline storage | In repo (explicit requirement) | SaaS | SaaS |
+| CI integration | JUnit + HTML report (already wired) | Webhook + PR comments | Webhook + PR comments |
+| Font rendering determinism | Pinned Docker image | Their browser farm | Their browser farm |
+| Operational dependency | Zero | External SaaS | External SaaS |
+| Review ergonomics | HTML report with side-by-side diff | Strong (PR-integrated) | Strong (PR-integrated) |
+
+**Chosen:** Playwright-native. Reuses Slice 19 infrastructure, satisfies the OSS constraint, baselines live alongside code. The ergonomic gap vs. Percy/Chromatic is mitigated by the two-step review workflow (below).
+
+**Determinism strategy:**
+- All snapshots generated inside a pinned container: `mcr.microsoft.com/playwright:v1.48.0-jammy`.
+- Local `make e2e:visual` invokes `docker compose run --rm e2e-visual` so macOS dev and Linux CI produce byte-identical output.
+- Direct host-machine runs are blocked (config detects `process.env.CI !== 'true' && !process.env.E2E_DOCKER` and refuses).
+
+**Tooling additions (new):**
+- Add `PlaywrightTestConfig.use.screenshot.maxDiffPixelRatio = 0.01` as global default (1% tolerance).
+- New Playwright project: `visual-desktop` (chromium, 1440×900) and `visual-mobile` (iPhone 14 Pro).
+- Snapshot directory: `e2e/__screenshots__/{spec-name}/{snapshot-name}-{project}.png` (Playwright default).
+- New service in `docker-compose.e2e.yml`: `e2e-visual` container, reads backend via internal network.
+
+**Snapshot matrix (~138 baselines, ~20 MB total):**
+
+| Target | Desktop (10 industries) | Mobile (10 industries) | State variants (NovaPay only) |
+|--------|------------------------|------------------------|-------------------------------|
+| LoginPage (branded) | 10 | 10 | **1** — error state (wrong password) |
+| BoardListPage with seeded boards | 10 | — | 2 — empty, loading, error (3 total) |
+| TableView | 10 | 10 (NovaPay board only = 1) | 2 — empty, loading |
+| KanbanView | 10 | — | 2 — empty, loading |
+| CalendarView | 10 | — | — |
+| TimelineView | 10 | — | — |
+| ChartView | 10 | — | — |
+| FormView | 10 | — | — |
+| DashboardView | 10 | — | — |
+| MapView | 10 | — | — |
+| **Column-edit screen** | — | 1 (NovaPay) | — |
+| **Subtotals** | 100 | 11 | 8 |
+
+Grand total: ~119 snapshots desktop + mobile + variants. Storage estimated at 150 KB/PNG avg → ~18 MB. Comfortable margin under 50 MB cap.
+
+**State variant breakdown (NovaPay only, desktop only):**
+1. LoginPage — error state (wrong password, red border + aria-live message)
+2. BoardListPage — empty (new workspace, no boards)
+3. BoardListPage — loading (skeleton state)
+4. BoardListPage — error (API 500 response via route intercept)
+5. TableView — empty (board with zero items)
+6. TableView — loading (skeleton rows)
+7. KanbanView — empty (board with zero items)
+8. KanbanView — loading (skeleton columns)
+
+**Flake prevention:**
+- Mask dynamic regions with `expect(page).toHaveScreenshot({ mask: [...selectors] })`:
+  - All timestamps (`[data-testid="timestamp"]`)
+  - All avatars that use color-hash fallbacks (`.avatar-fallback`)
+  - Any counter that depends on cumulative state (`[data-testid="notification-count"]`)
+- Before every snapshot:
+  - `await page.evaluate(() => document.fonts.ready)` — wait for webfont load
+  - `await page.waitForLoadState('networkidle')` — ensure images + XHR settled
+  - Inject CSS via `addStyleTag`: `*, *::before, *::after { animation: none !important; transition: none !important; caret-color: transparent !important; }`
+- Seed data uses the same fixed timestamps as Slice 19 (`2026-01-01T00:00:00Z` baseline).
+- Any snapshot that fails 3-consecutive-run determinism check is **rejected** (not allowlisted). Flaky snapshots indicate a real non-determinism bug to fix, not mask.
+
+**Two-step review workflow (documented in CONTRIBUTING.md):**
+
+When intentionally changing UI:
+
+```
+Step 1 — Generate diff report (DO NOT update baselines yet):
+  make e2e:visual
+  # Suite fails on changed snapshots; open the HTML report
+  open e2e/playwright-report/index.html
+  # Review each before/after side-by-side diff
+
+Step 2 — If changes are intentional, update baselines:
+  make e2e:visual:update
+  # Stages regenerated PNGs in e2e/__screenshots__/
+  git add e2e/__screenshots__/
+  git commit -m "visual: update baselines for <change description>"
+```
+
+The two-step process prevents the common mistake of running `--update-snapshots` reflexively and committing unintended visual changes (e.g., color change when you meant to adjust padding).
+
+**CI readiness (config only, no pipeline yet):**
+- JUnit XML output separate from Slice 19: `e2e/results/visual-junit.xml`
+- HTML diff report uploaded as CI artifact: `e2e/playwright-report/`
+- Non-zero exit on any snapshot mismatch
+- PR comment automation deferred to Slice 20 (CI pipeline slice)
+
+**Make targets (new):**
+- `make e2e:visual` — build pinned Docker image, run visual suite in container, emit HTML + JUnit report
+- `make e2e:visual:update` — re-run with `--update-snapshots`, stage changed PNGs
+- `make e2e:visual:ui` — Playwright UI mode against a running stack (developer debug)
+
+**Files to create:**
+- `e2e/playwright.visual.config.ts` (extends base config with screenshot-specific settings)
+- `e2e/specs/visual/01-login.visual.spec.ts`
+- `e2e/specs/visual/02-board-list.visual.spec.ts`
+- `e2e/specs/visual/03-board-views.visual.spec.ts` (parameterized across 8 views × 10 industries)
+- `e2e/specs/visual/04-state-variants.visual.spec.ts` (NovaPay only)
+- `e2e/specs/visual/05-mobile-smoke.visual.spec.ts`
+- `e2e/helpers/visual.ts` (font/image wait, animation-disable CSS, mask selectors)
+- `e2e/__screenshots__/` (directory; PNGs added on first run)
+- `CONTRIBUTING.md` (new file; includes the two-step review workflow section)
+
+**Files to modify:**
+- `Makefile` — add 3 `e2e:visual*` targets
+- `docker-compose.e2e.yml` — add `e2e-visual` service using pinned Playwright image
+- `e2e/package.json` — no new deps; relies on `@playwright/test` from Slice 19
+- `SPEC.md` — this section
+
+**Out of scope:**
+- Load / performance testing → Slice 19C
+- New functional flows beyond what Slice 19 covers
+- Visual diffs on hover/focus states (too rendering-dependent)
+- Firefox / WebKit visual coverage
+- CI PR comment automation (deferred to Slice 20)
+
+**Boundaries (slice-specific):**
+- Always: generate snapshots inside the pinned Docker image; never run baselines from host macOS/Windows directly
+- Ask first: raising `maxDiffPixelRatio` above 0.01 on any snapshot
+- Never: allowlist a flaky snapshot; never commit a snapshot update without the 2-step review
+
+**Success criteria (slice-level):**
+- [ ] `make e2e:visual` exits 0 on a clean checkout in < 5 min
+- [ ] All ~119 baselines committed, diff-stable across 3 consecutive runs
+- [ ] Total `e2e/__screenshots__/` size < 50 MB
+- [ ] CONTRIBUTING.md documents the two-step update workflow with copy-paste commands
+- [ ] Intentionally breaking one industry's brand color (via local edit) causes the suite to fail with a human-readable diff in the HTML report
+
+---
+
+#### Slice 19C: Load and Performance Testing (Size: XL)
+
+**Objective:** Validate the backend (port 13000) can sustain target load across REST, WebSocket, automation engine, and file upload paths. Establish performance baselines for future regression detection. Runs against an isolated perf profile — never against dev or shared DB.
+
+**Prerequisite:** Slice 19 complete. 19B is independent — 19C does not depend on it.
+
+**Decision (ADR): Artillery**
+
+| Criterion | Artillery | k6 | Locust |
+|-----------|-----------|----|----|
+| Socket.io v4 support | **First-class engine** (decisive) | xk6-socketio extension (custom binary build) | python-socketio (custom client) |
+| Scripting language | YAML + JS hooks | JavaScript | Python (adds language to stack) |
+| REST ergonomics | Good | Excellent | Good |
+| Metrics export | JSON, Prometheus (plugin) | JSON, CSV, Prometheus, InfluxDB | JSON, Prometheus (exporter) |
+| CI integration | Docker, JSON output | Docker, JUnit | Docker, JSON |
+| Licensing | MPL 2.0 (free community) | Apache 2.0 (open-core) | MIT |
+| Install path | `npm install -g artillery` | Custom binary or Docker | `pip install locust` |
+
+**Chosen:** Artillery. The Socket.io v4 engine is decisive given scenario (b) is core to the architecture (Socket.io + Redis adapter is the real-time backbone). k6's superior REST ergonomics do not offset the xk6 custom-binary maintenance cost. Locust adds Python to an otherwise Node/TS stack. Single-tool simplicity wins.
+
+---
+
+**Target SLOs:**
+
+| Surface | Metric | Target | Enforcement |
+|---------|--------|--------|-------------|
+| REST API | p50 latency | < 100 ms at 100 RPS sustained | Baseline + flag on >10% regression |
+| REST API | p95 latency | < 500 ms at 100 RPS sustained | Baseline + flag on >10% regression |
+| REST API | p99 latency | < 1000 ms at 100 RPS sustained | Baseline + flag on >10% regression |
+| REST API | error rate | < 0.1% | Baseline + flag on increase |
+| WebSocket | concurrent connections | 500 per workspace, stable for 5 min | Pass/fail: all 500 must connect |
+| WebSocket | broadcast fan-out latency | p95 < 200 ms for `item:updated` to all 500 clients | Baseline + flag on >10% regression |
+| Redis | cache hit rate | > 80% on `BoardService.getByIdCached` after warmup | Pass/fail |
+| Postgres | connection pool | No exhaustion events during any scenario | Pass/fail |
+| Automation | burst execution | 100-item burst × 4 automations each completes in < 30 s | Baseline + flag on >10% regression |
+| File upload | concurrent quota integrity | 50 × 5 MB uploads respect workspace quota without deadlock | Pass/fail |
+
+**Regression gate behavior (Slice 19C initial):**
+- **Flag-only** — regressions > 10% vs. baseline emit warnings in the markdown report; suite exits 0.
+- Upgrade to tiered enforcement (p50 flag, p95/p99 fail) AFTER 3 stable consecutive baselines exist.
+- Pass/fail SLOs (connection pool, cache hit rate, error rate, WS connect-all-500, file upload integrity) exit non-zero immediately.
+
+---
+
+**Test environment:**
+- New `docker-compose.perf.yml` overlay.
+- **Separate database** `crm_perf` inside the existing Postgres container (not a separate container — shared Postgres process, different DB name, migrations run independently).
+- **Separate Redis logical DB** — backend connects to `redis://redis:6379/1` when `NODE_ENV=perf` (dev uses `db 0`, untouched).
+- **Resource limits** via `deploy.resources.limits`:
+  - backend: 1 CPU, 1 GB RAM
+  - postgres: 2 CPU, 2 GB RAM
+  - redis: 0.5 CPU, 256 MB RAM
+- `NODE_ENV=perf` flag gates: disabled request logging (morgan), disabled debug endpoints, production error handler.
+- Backend runs `npm run build && node dist/server.js` (compiled, not ts-node).
+- No industry frontends started — perf only exercises the backend.
+
+---
+
+**Data seeding:**
+- New script `backend/src/scripts/seed-perf.ts`.
+- Fixed random seed (`PERF_SEED=42`) for reproducibility.
+- Volume: 1 workspace × 1000 boards × 100 items × 15 columns = **1.5M column values**.
+- Bulk insert strategy: `bulkCreate` inside transactions, 5000-row batches, run in parallel-per-table where FK constraints allow.
+- Expected seed runtime: 3–5 min on the perf profile.
+- Idempotent: detects existing perf workspace and skips if row counts match expected.
+
+---
+
+**Scenarios (30 min total budget):**
+
+**Warmup — 2 min**
+- Prime the Redis cache: 100 random `GET /api/v1/boards/:id` requests across the seeded workspace.
+- Establish HTTP keep-alive pool and Postgres connection pool.
+- Metrics from warmup period excluded from p50/p95/p99 calculations.
+
+**Scenario (a) — REST mixed CRUD — 10 min**
+- 100 RPS sustained, ramped over first 30 s.
+- Mix: 60% reads (`GET /items?boardId=X`, `GET /boards/:id`), 30% writes (`POST /items`, `PATCH /column-values`), 10% deletes (soft delete `DELETE /items/:id`).
+- Virtual users: 50. Each VU pulls a random seeded board for the session.
+- Measures: p50/p95/p99 per verb, error rate, Redis hit rate, DB pool saturation.
+
+**Scenario (b) — WebSocket — 8 min**
+- Ramp to 500 concurrent Socket.io clients over 60 s, all joining the same board room.
+- Sustained 5 min: publisher client emits `item:updated` at 2 events/sec.
+- Each subscriber measures time from server timestamp to client-receive → fan-out latency.
+- Measures: p50/p95/p99 fan-out latency, connection success rate, disconnect/reconnect events.
+- Uses Artillery's `socketio-v3` engine (compatible with Socket.io v4 server).
+
+**Scenario (c) — Automation burst — 3 min**
+- Single burst: 100 `POST /items` calls fired in 5 s, each targeting a board with 4 active automation rules (status-change → notification, status-change → assign, cron-based, webhook).
+- Measures: wall-clock time from first POST to last AutomationLog row written, queue depth peaks, automation engine CPU utilization.
+- Pass condition: all 400 expected AutomationLog rows present within 30 s.
+
+**Scenario (d) — File upload — 5 min**
+- 50 concurrent `POST /items/:id/files` uploads, each a 5 MB deterministic payload.
+- Workspace quota pre-set to 200 MB (allows 40 uploads, rejects last 10).
+- Measures: successful uploads, correct quota-rejection count (expect 10 rejects with 413), no partial writes, no deadlock or request timeout.
+- Integrity check post-run: actual storage usage matches SUM of successful upload sizes.
+
+**Teardown + report — 2 min**
+- Drop `crm_perf` database; flush Redis db 1.
+- Aggregate per-scenario JSON into a single markdown report.
+
+---
+
+**Reporting:**
+- `e2e/perf/run.ts` orchestrates scenarios sequentially, collects Artillery JSON output per scenario.
+- Writes `e2e/perf/results/{ISO-timestamp}.md` with:
+  - Run metadata (commit SHA, node version, date, host CPU/RAM)
+  - SLO table: measured vs. target, per metric
+  - Regression diff vs. `e2e/perf/results/baseline.md` (flags >10% changes with ▲/▼ arrows)
+  - Raw JSON artifacts linked for drill-down
+- `baseline.md` updated manually via `make e2e:perf:set-baseline` — never auto-updated.
+- Last 10 runs retained in `e2e/perf/results/`; older runs auto-pruned.
+
+---
+
+**Make targets (new):**
+- `make e2e:perf` — build backend image, start perf profile, wait on `/health`, run seed-perf, execute all scenarios, emit report, tear down.
+- `make e2e:perf:seed-only` — seed the perf dataset without running scenarios (developer debug).
+- `make e2e:perf:scenario NAME=a` — run a single scenario against an already-running perf profile.
+- `make e2e:perf:set-baseline` — copy the latest result to `baseline.md` (manual gate).
+- `make e2e:perf:teardown` — stop the perf profile + drop `crm_perf` DB.
+
+---
+
+**Files to create:**
+- `e2e/perf/artillery/common.yml` (shared config: phases, http keep-alive, Socket.io engine)
+- `e2e/perf/artillery/scenario-a-rest.yml`
+- `e2e/perf/artillery/scenario-b-websocket.yml`
+- `e2e/perf/artillery/scenario-c-automation.yml`
+- `e2e/perf/artillery/scenario-d-file-upload.yml`
+- `e2e/perf/run.ts` (orchestrator)
+- `e2e/perf/lib/report.ts` (markdown renderer + regression diff)
+- `e2e/perf/lib/fixtures.ts` (generate 5 MB payload buffer, etc.)
+- `e2e/perf/results/baseline.md` (empty initial file, populated after first stable run)
+- `e2e/perf/package.json` (Artillery + TS dev deps)
+- `e2e/perf/tsconfig.json`
+- `docker-compose.perf.yml`
+- `backend/src/scripts/seed-perf.ts`
+- `backend/src/config/perf.ts` (perf-mode env handling)
+
+**Files to modify:**
+- `Makefile` — add 5 `e2e:perf*` targets
+- `backend/src/config/index.ts` — add `perf` NODE_ENV branch (Redis db 1, logging off)
+- `backend/src/config/database.ts` — add `crm_perf` DB when `NODE_ENV=perf`
+- `backend/package.json` — add `seed:perf` npm script
+- `SPEC.md` — this section
+
+---
+
+**Out of scope:**
+- Frontend performance (Lighthouse, Core Web Vitals) → separate slice if needed
+- Multi-region / geographic latency testing
+- Chaos engineering / fault injection
+- Capacity planning beyond the documented SLOs
+- Automated performance CI pipeline → Slice 20
+
+**Boundaries (slice-specific):**
+- Always: run perf profile in an isolated environment with resource limits applied
+- Ask first: raising SLO targets (tighter perf requirements) OR changing regression gate to tiered/hard-fail before 3 stable baselines exist
+- Never: run perf scenarios against dev DB, shared Redis, or any environment named `development`/`staging`/`production`; never seed the perf dataset into the main `crm` database
+
+**Success criteria (slice-level):**
+- [ ] `make e2e:perf` exits 0 on a clean checkout in < 30 min
+- [ ] All pass/fail SLOs pass on first run (WS 500-client connect, cache hit rate > 80%, DB pool no exhaustion, file upload quota integrity)
+- [ ] Markdown report emitted with p50/p95/p99 per scenario + regression diff vs. baseline
+- [ ] 3 consecutive runs produce p50/p95/p99 values within 10% of each other (reproducibility check)
+- [ ] Seeded dataset of 1.5M column values present, queries sub-second on indexed columns
+- [ ] No dev or shared DB touched — verified by pre/post row-count diff on `crm` database
+
+---
+
 ## Success Criteria
 
 - [ ] All 18 vertical slices implemented and working
