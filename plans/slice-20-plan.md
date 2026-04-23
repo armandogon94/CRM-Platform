@@ -163,11 +163,14 @@ Phase E — Verification (sequential)
 
 **Acceptance criteria:**
 - [ ] Returns `{ canCreateBoard, canCreateItem, canEditInline, canDelete }` — all booleans
-- [ ] `admin` + `manager` → all `true`
+- [ ] `admin` → all `true`
 - [ ] `member` → `canCreateBoard=false`, rest `true`
 - [ ] `viewer` → all `false`
+- [ ] `null` user (between logouts / token refresh) → all `false` (safe default)
 - [ ] Derived from `useAuth().user.role` (existing auth context)
 - [ ] Stable reference (memoized on role)
+
+> **Reality check during A4:** The backend `UserRole` enum only defines `'admin' | 'member' | 'viewer'` — the spec's earlier `manager` row was aspirational and doesn't exist. Dropped from both the matrix and this acceptance list.
 
 **Verification:**
 - [ ] `cd frontends/_shared && npm test -- useCanEdit` — 4 role cases pass

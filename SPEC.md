@@ -1469,9 +1469,10 @@ Accessibility: `role="status"` for success/info, `role="alert"` for error/warnin
 | Role | See New Board | See New Item | See Inline-Edit | See Delete |
 |------|---------------|--------------|-----------------|------------|
 | admin | ✓ | ✓ | ✓ | ✓ |
-| manager | ✓ | ✓ | ✓ | ✓ |
 | member | ✗ (read-only in Slice 20) | ✓ | ✓ | ✓ (own items only — enforced server-side; UI shows button for all, server returns 403 on foreign items) |
 | viewer | ✗ | ✗ | ✗ | ✗ |
+
+> **Correction (A4):** An earlier draft of this matrix included a `manager` row. The backend `UserRole` enum only defines `'admin' | 'member' | 'viewer'` and no `manager` seed data exists, so the row was removed during Task A4 implementation. If `manager` is ever added as a real role, extending `useCanEdit()` is a one-line switch case.
 
 `member` board-create restriction is a product decision, not a security one — server allows it. Revisit in Slice 22 (collaboration features). For Slice 20, UI gates purely by role.
 
