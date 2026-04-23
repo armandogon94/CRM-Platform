@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, MoreVertical, Trash2 } from 'lucide-react';
 import type { Board, Column, Item, ColumnValue } from '../../types/index';
 import { ColumnRenderer } from './ColumnRenderer';
 import { normalizeStatusValue, type StatusOption } from '../../utils/status';
+import { ConfirmDialog } from '../common/ConfirmDialog';
 
 interface KanbanViewProps {
   board: Board;
@@ -32,7 +33,7 @@ function getColumnValue(item: Item, columnId: number): any {
   return cv?.value ?? null;
 }
 
-export function KanbanView({ board, items, onItemCreate }: KanbanViewProps) {
+export function KanbanView({ board, items, onItemCreate, onItemDelete }: KanbanViewProps) {
   const statusColumn = board.columns?.find((c) => c.columnType === 'status');
   const statusOptions =
     (statusColumn?.config as { options?: { label: string; color: string }[] })?.options || [];
@@ -69,6 +70,7 @@ export function KanbanView({ board, items, onItemCreate }: KanbanViewProps) {
           items={uncategorized}
           cardColumns={cardColumns}
           board={board}
+          onItemDelete={onItemDelete}
         />
       )}
       {lanes.map((lane) => (
@@ -80,6 +82,7 @@ export function KanbanView({ board, items, onItemCreate }: KanbanViewProps) {
           cardColumns={cardColumns}
           board={board}
           onItemCreate={onItemCreate}
+          onItemDelete={onItemDelete}
         />
       ))}
     </div>
@@ -93,6 +96,7 @@ function KanbanLane({
   cardColumns,
   board,
   onItemCreate,
+  onItemDelete,
 }: {
   label: string;
   color: string;
@@ -100,6 +104,7 @@ function KanbanLane({
   cardColumns: Column[];
   board: Board;
   onItemCreate?: (groupId: number, name: string) => void;
+  onItemDelete?: (itemId: number) => void;
 }) {
   const [newItemName, setNewItemName] = useState('');
   const [isAdding, setIsAdding] = useState(false);
@@ -129,27 +134,13 @@ function KanbanLane({
 
       <div className="space-y-2">
         {items.map((item) => (
-          <div
+          <KanbanCard
             key={item.id}
-            className="bg-white rounded-lg border border-gray-200 p-3 hover:shadow-md transition-shadow cursor-pointer"
-            style={{ borderLeftWidth: 3, borderLeftColor: color }}
-          >
-            <p className="font-medium text-sm text-gray-900 mb-2">{item.name}</p>
-            {cardColumns.length > 0 && (
-              <div className="space-y-1.5">
-                {cardColumns.map((col) => {
-                  const val = getColumnValue(item, col.id);
-                  if (val === null || val === undefined) return null;
-                  return (
-                    <div key={col.id} className="flex items-center gap-2">
-                      <span className="text-xs text-gray-400 min-w-[60px]">{col.name}:</span>
-                      <ColumnRenderer column={col} value={val} compact />
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+            item={item}
+            color={color}
+            cardColumns={cardColumns}
+            onItemDelete={onItemDelete}
+          />
         ))}
 
         {items.length === 0 && (
@@ -209,5 +200,117 @@ function KanbanLane({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Single Kanban card. Renders item name + up to 3 non-status card
+ * columns, plus a kebab menu in the top-right when onItemDelete is
+ * wired. The kebab → menu → confirm-dialog flow lives here rather
+ * than being hoisted to the lane so state (menu open, dialog open)
+ * is scoped to each card — a delete confirm on card A doesn't affect
+ * card B.
+ */
+function KanbanCard({
+  item,
+  color,
+  cardColumns,
+  onItemDelete,
+}: {
+  item: Item;
+  color: string;
+  cardColumns: Column[];
+  onItemDelete?: (itemId: number) => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  // Close the menu when the user clicks outside it. Simpler than a
+  // formal click-away ref library given this is a one-item dropdown.
+  React.useEffect(() => {
+    if (!menuOpen) return;
+    const close = () => setMenuOpen(false);
+    // Defer until after the current click resolves so the open click
+    // doesn't immediately close the menu.
+    const timer = setTimeout(() => {
+      document.addEventListener('click', close);
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('click', close);
+    };
+  }, [menuOpen]);
+
+  return (
+    <>
+      <div
+        className="relative bg-white rounded-lg border border-gray-200 p-3 hover:shadow-md transition-shadow cursor-pointer"
+        style={{ borderLeftWidth: 3, borderLeftColor: color }}
+      >
+        {onItemDelete && (
+          <button
+            type="button"
+            aria-label="Item actions"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen((v) => !v);
+            }}
+            className="absolute top-2 right-2 p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <MoreVertical size={14} />
+          </button>
+        )}
+        {onItemDelete && menuOpen && (
+          <div
+            role="menu"
+            className="absolute top-8 right-2 z-10 bg-white border border-gray-200 rounded-md shadow-lg py-1 min-w-[140px]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setMenuOpen(false);
+                setConfirmOpen(true);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+            >
+              <Trash2 size={14} />
+              Delete
+            </button>
+          </div>
+        )}
+        <p className="font-medium text-sm text-gray-900 mb-2 pr-6">{item.name}</p>
+        {cardColumns.length > 0 && (
+          <div className="space-y-1.5">
+            {cardColumns.map((col) => {
+              const val = getColumnValue(item, col.id);
+              if (val === null || val === undefined) return null;
+              return (
+                <div key={col.id} className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400 min-w-[60px]">{col.name}:</span>
+                  <ColumnRenderer column={col} value={val} compact />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {onItemDelete && (
+        <ConfirmDialog
+          open={confirmOpen}
+          title={`Delete ${item.name}?`}
+          description="This cannot be undone."
+          confirmLabel="Delete"
+          cancelLabel="Cancel"
+          variant="danger"
+          onConfirm={() => {
+            setConfirmOpen(false);
+            onItemDelete(item.id);
+          }}
+          onCancel={() => setConfirmOpen(false)}
+        />
+      )}
+    </>
   );
 }
