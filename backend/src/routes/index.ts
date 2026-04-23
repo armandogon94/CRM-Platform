@@ -19,6 +19,7 @@ import fileRouter from './files';
 import activityLogRouter from './activityLogs';
 import adminE2eRouter from './admin.e2e';
 
+import BoardService from '../services/BoardService';
 import Board from '../models/Board';
 import BoardGroup from '../models/BoardGroup';
 import BoardView from '../models/BoardView';
@@ -309,6 +310,76 @@ router.put('/items/:id/values', authenticate, async (req: AuthRequest, res: Resp
     return successResponse(res, { values: results }, 'Values updated');
   } catch (error) {
     return errorResponse(res, 'Failed to update values', 500);
+  }
+});
+
+// DELETE /items/:id — soft-delete item (flat shim for Slice 20 A2.5)
+//
+// Mirrors the nested /workspaces/:w/boards/:b/items/:id handler's
+// authorization semantics (board must belong to the authenticated
+// user's workspace) but uses the flat URL the industry clients call.
+// `item.destroy()` honors Sequelize's paranoid soft-delete — sets
+// deletedAt and leaves the row for audit recovery.
+router.delete('/items/:id', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    if (isNaN(id)) {
+      return errorResponse(res, 'Invalid item ID', 400);
+    }
+
+    const item = await Item.findByPk(id);
+    if (!item) {
+      return errorResponse(res, 'Item not found', 404);
+    }
+
+    // Workspace ownership check: the item's board must belong to the
+    // authenticated user's workspace. Returning 403 (not 404) because
+    // the item DOES exist — the user just isn't allowed to touch it.
+    const board = await Board.findOne({
+      where: { id: item.boardId, workspaceId: req.user!.workspaceId },
+    });
+    if (!board) {
+      return errorResponse(res, 'Access denied', 403);
+    }
+
+    await item.destroy();
+    return successResponse(res, null, 'Item deleted');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to delete item';
+    return errorResponse(res, message, 500);
+  }
+});
+
+// POST /boards — create board (flat shim for Slice 20 A2.5)
+//
+// BoardListPage.tsx already POSTs to /boards; this endpoint was the
+// missing piece that was silently 404-ing behind the component's
+// empty catch block. `workspaceId` MUST come from the body AND match
+// the authenticated user's workspace — reject cross-workspace writes
+// with 403 rather than silently honoring the body value.
+router.post('/boards', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, description, workspaceId, boardType, settings } = req.body;
+
+    if (!name) {
+      return errorResponse(res, 'Board name is required', 400);
+    }
+    if (!workspaceId) {
+      return errorResponse(res, 'workspaceId is required', 400);
+    }
+    if (workspaceId !== req.user!.workspaceId) {
+      return errorResponse(res, 'Cannot create board in another workspace', 403);
+    }
+
+    const board = await BoardService.create(
+      { name, description, boardType, settings },
+      workspaceId,
+      req.user!
+    );
+    return successResponse(res, { board }, 'Board created', 201);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to create board';
+    return errorResponse(res, message, 400);
   }
 });
 
