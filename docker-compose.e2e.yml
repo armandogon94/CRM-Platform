@@ -24,5 +24,11 @@ services:
     environment:
       NODE_ENV: test
       E2E_RESET_ENABLED: "true"
+      # backend/.env has DB_HOST=localhost (for host-machine dev); the
+      # containerised backend must reach postgres via the service name.
+      # Same for REDIS_URL. We override both here so the overlay works
+      # regardless of the developer's .env state.
+      DB_HOST: postgres
+      REDIS_URL: redis://redis:6379
     tmpfs:
       - /app/uploads

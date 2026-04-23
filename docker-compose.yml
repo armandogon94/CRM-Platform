@@ -65,7 +65,6 @@ services:
     build:
       context: ./frontends/novapay
       dockerfile: Dockerfile
-      target: dev
     container_name: crm-novapay-frontend
     ports:
       - "13001:13001"
@@ -84,7 +83,6 @@ services:
     build:
       context: ./frontends/medvista
       dockerfile: Dockerfile
-      target: dev
     container_name: crm-medvista-frontend
     ports:
       - "13002:13002"
@@ -103,7 +101,6 @@ services:
     build:
       context: ./frontends/trustguard
       dockerfile: Dockerfile
-      target: dev
     container_name: crm-trustguard-frontend
     ports:
       - "13003:13003"
@@ -122,7 +119,6 @@ services:
     build:
       context: ./frontends/urbannest
       dockerfile: Dockerfile
-      target: dev
     container_name: crm-urbannest-frontend
     ports:
       - "13004:13004"
@@ -141,7 +137,6 @@ services:
     build:
       context: ./frontends/swiftroute
       dockerfile: Dockerfile
-      target: dev
     container_name: crm-swiftroute-frontend
     ports:
       - "13005:13005"
@@ -160,7 +155,6 @@ services:
     build:
       context: ./frontends/dentaflow
       dockerfile: Dockerfile
-      target: dev
     container_name: crm-dentaflow-frontend
     ports:
       - "13006:13006"
@@ -179,7 +173,6 @@ services:
     build:
       context: ./frontends/jurispath
       dockerfile: Dockerfile
-      target: dev
     container_name: crm-jurispath-frontend
     ports:
       - "13007:13007"
@@ -198,7 +191,6 @@ services:
     build:
       context: ./frontends/tablesync
       dockerfile: Dockerfile
-      target: dev
     container_name: crm-tablesync-frontend
     ports:
       - "13008:13008"
@@ -217,7 +209,6 @@ services:
     build:
       context: ./frontends/cranestack
       dockerfile: Dockerfile
-      target: dev
     container_name: crm-cranestack-frontend
     ports:
       - "13009:13009"
@@ -236,7 +227,6 @@ services:
     build:
       context: ./frontends/edupulse
       dockerfile: Dockerfile
-      target: dev
     container_name: crm-edupulse-frontend
     ports:
       - "13010:13010"

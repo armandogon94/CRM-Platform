@@ -50,6 +50,7 @@ e2e:
 		sleep 1; \
 	done; \
 	curl -sfS $(HEALTH_URL) >/dev/null || { echo "backend /health never came up"; exit 1; }; \
+	$(COMPOSE) exec -T backend npm run seed; \
 	$(COMPOSE) up -d $(INDUSTRY_FRONTENDS); \
 	cd e2e && npx playwright test
 
@@ -63,6 +64,7 @@ e2e-desktop:
 		sleep 1; \
 	done; \
 	curl -sfS $(HEALTH_URL) >/dev/null || { echo "backend /health never came up"; exit 1; }; \
+	$(COMPOSE) exec -T backend npm run seed; \
 	$(COMPOSE) up -d $(INDUSTRY_FRONTENDS); \
 	cd e2e && npx playwright test --project=desktop-novapay --project=desktop-branding-all
 
@@ -76,6 +78,7 @@ e2e-mobile:
 		sleep 1; \
 	done; \
 	curl -sfS $(HEALTH_URL) >/dev/null || { echo "backend /health never came up"; exit 1; }; \
+	$(COMPOSE) exec -T backend npm run seed:novapay; \
 	$(COMPOSE) up -d novapay-frontend; \
 	cd e2e && npx playwright test --project=mobile-novapay
 
