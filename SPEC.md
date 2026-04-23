@@ -1369,6 +1369,191 @@ The two-step process prevents the common mistake of running `--update-snapshots`
 
 ---
 
+#### Slice 20: CRUD UI Wiring Across Industry Frontends (Size: L)
+
+**Objective:** Expose end-to-end CRUD (create item, edit column value, delete item, create board) through the UI of three reference industry shells — NovaPay, MedVista, JurisPath — by wiring the already-built shared-library components (`FormView`, `BoardListPage` with `New Board` dialog, `ColumnEditor`) into the per-industry App shells. Every action must round-trip through the REST API and replicate via Socket.io to other connected clients. No new backend work; this slice surfaces the existing backend capability in the UI.
+
+**Prerequisite:** Slices 16 (shared library), 17 (seed data), 18 (industry shells), and 19.7 (normalization fixes merged as `21aad33` + `d470ffb`) complete. Slice 19 E2E infrastructure available for the new tests.
+
+**Decision (ADR): Staged rollout**
+
+| Option | Industries in Slice 20 | Industries deferred | Slice length | Risk |
+|--------|------------------------|---------------------|--------------|------|
+| Big bang | All 10 | — | XL | High — one regression in the shared library breaks all 10 industries simultaneously |
+| **Staged (chosen)** | **3 (NovaPay, MedVista, JurisPath)** | **7 → Slice 20B** | **L** | Low — reference implementation proved on 3 before fanout to the other 7 |
+| NovaPay-only | 1 | 9 → Slice 20B + 20C | M | Lowest risk, highest overhead — 3 slices for what could be 2 |
+
+**Chosen:** Staged with 3 industries. NovaPay (already router-migrated, FinTech shell) proves the CRUD wiring end-to-end; MedVista (state-based nav, Healthcare shell) proves the pattern works *without* the router migration dependency, settling open question #2; JurisPath (state-based nav, Legal shell with 3 boards each having distinct status/workflow semantics) proves the shared components handle domain variance. Slice 20B extends to the remaining 7 with parallel subagents once the pattern is locked.
+
+---
+
+**Open questions — recommended answers:**
+
+1. **Rollout strategy** — Staged (see ADR above). Slice 20 wires 3 industries; Slice 20B fans out to 7.
+2. **Router migration coupling** — **Decoupled.** CRUD wiring works identically on state-based and router-based shells because the shared components (`FormView`, `ColumnEditor`, `BoardListPage` dialog) operate on props and callbacks, not routes. Router migration of the 9 state-based shells remains a separate cleanup slice.
+3. **Permission model** — **Respect RBAC.** Affordances (New Item, New Board, delete, inline-edit) are shown based on `user.role` (`admin` / `manager` / `member` / `viewer`). `viewer` sees read-only UI; everyone else gets full CRUD for Slice 20. Slice-scoped: no per-board or per-column ACL changes — the existing role check in `AuthService.authenticate` middleware is the source of truth.
+4. **Optimistic updates vs server round-trip** — **Server round-trip with optimistic UI for inline-edit only.** `POST /items` and `POST /boards` use a loading state until the server echoes. Inline `PUT /items/:id/values` updates the cell optimistically and rolls back if the server returns an error (rare — validation already matches the ColumnEditor contract). Rationale: item creation latency is hidden by the FormView success toast; status-edit latency would feel laggy on a 200-item table without optimism.
+5. **Form validation** — **Both.** Client-side constraints come from `column.config` (`min_value`, `max_value`, `isRequired`, `include_time`, regex for email/URL) and block submission before network. Server is still authoritative — if `PATCH /items/:id/values` rejects with 422, the UI surfaces the server error inline and rolls back optimistic state.
+6. **Error-state UX** — **Add `<Toast>` to the shared library** (stack of dismissable banners, bottom-right, 5 s auto-dismiss). Single source for create-failed / delete-failed / quota-exceeded messages. `<Toast>` is added once in `_shared/src/components/common/Toast.tsx`; each industry mounts a `<ToastProvider>` at the App root. Toast-driven error surface is a slice deliverable because the existing industry shells swallow `catch` blocks silently — this is a latent bug the CRUD slice would otherwise compound.
+7. **Scope exclusions** — Confirmed. File upload, person picker, formula editing, bulk actions, board settings editor, board templates → future slices.
+
+---
+
+**UI contract — per flow:**
+
+**Flow A — Create item from Kanban lane:**
+- Every `KanbanLane` gets a `+ Add item` button at the bottom (existing `onItemCreate` prop is wired).
+- Clicking opens an inline form anchored to the lane: just `name` + `Create` / `Cancel` buttons.
+- `POST /api/v1/items` with `{ boardId, groupId: <lane.groupId>, name, values: {} }`.
+- On success, the server-sent `item:created` Socket.io event appends the item to the lane via existing `useBoard` subscription — no local state mutation needed.
+- On failure, inline error bar + Toast; form stays open with the typed name preserved.
+
+**Flow B — Create item from Table group:**
+- Every table group row gets a `+ Add item` button in the group header.
+- Clicking opens the `FormView` component (already built) in a modal / side-drawer with all column inputs.
+- Submitting calls `POST /api/v1/items` with `{ boardId, groupId, name, values: {columnId: value} }`.
+- Modal closes on success; Socket.io echo inserts the row.
+
+**Flow C — Inline-edit a Status column value on Table view:**
+- Clicking a Status cell mounts `ColumnEditor` in-place (existing component).
+- Selecting an option calls `PUT /api/v1/items/:id/values` with `{ values: [{ columnId, value: { label, color } }] }`.
+- UI updates optimistically; server echo confirms; on error (422 / 403 / network), toast + rollback.
+- Canonical shape is `{ label, color }` — same shape Slice 19.7 B2 normalizer produces.
+
+**Flow D — Delete item from Kanban card menu:**
+- Each Kanban card gets a kebab menu with `Delete` option.
+- Confirmation modal: "Delete {item.name}? This cannot be undone."
+- `DELETE /api/v1/items/:id` → soft delete.
+- Optimistic removal from lane; Socket.io `item:deleted` event confirms.
+
+**Flow E — Create board from sidebar / board-list:**
+- `BoardListPage` already has a complete `New Board` dialog (`showCreateDialog` state in `frontends/_shared/src/pages/BoardListPage.tsx:17`).
+- Verify it mounts on every industry. NovaPay already wires it; 2 other industries (MedVista, JurisPath) mount the `BoardListPage` at their `/boards` route or state key.
+- `POST /api/v1/boards` with `{ name, description, workspaceId, boardType: 'main' }`.
+- `refreshBoards()` via `WorkspaceContext` repopulates the sidebar.
+- Empty `catch` block in `handleCreateBoard` (line 42) is upgraded to surface a toast.
+
+**Flow F — Edit text / number / date column on Table view:**
+- Same pattern as Flow C using `ColumnEditor`'s switch cases for each column type.
+- Validation per column type from `column.config` (min/max for number, regex for email, required for text).
+
+---
+
+**Toast component contract:**
+
+```ts
+// frontends/_shared/src/components/common/Toast.tsx
+interface ToastMessage {
+  id: string;
+  variant: 'success' | 'error' | 'info' | 'warning';
+  title: string;
+  description?: string;
+  autoCloseMs?: number;  // default 5000; null to persist
+}
+
+interface ToastContextValue {
+  show(msg: Omit<ToastMessage, 'id'>): void;
+  dismiss(id: string): void;
+}
+
+export const ToastProvider: React.FC<{ children: React.ReactNode }>;
+export function useToast(): ToastContextValue;
+```
+
+Accessibility: `role="status"` for success/info, `role="alert"` for error/warning. Dismiss button with `aria-label="Dismiss notification"`.
+
+---
+
+**RBAC UI matrix:**
+
+| Role | See New Board | See New Item | See Inline-Edit | See Delete |
+|------|---------------|--------------|-----------------|------------|
+| admin | ✓ | ✓ | ✓ | ✓ |
+| manager | ✓ | ✓ | ✓ | ✓ |
+| member | ✗ (read-only in Slice 20) | ✓ | ✓ | ✓ (own items only — enforced server-side; UI shows button for all, server returns 403 on foreign items) |
+| viewer | ✗ | ✗ | ✗ | ✗ |
+
+`member` board-create restriction is a product decision, not a security one — server allows it. Revisit in Slice 22 (collaboration features). For Slice 20, UI gates purely by role.
+
+---
+
+**Testing strategy:**
+
+- **Shared library (vitest):** 1 new test file per shared component touched — `Toast.test.tsx` (12 cases: show/dismiss/variants/auto-close/keyboard a11y), `FormView.test.tsx` (submit/validation/reset), `ColumnEditor.test.tsx` (6 column-type cases), `BoardListPage.test.tsx` (dialog open/close/create-success/create-error). Target: +40 tests, 0 regressions.
+- **Backend (jest):** no new endpoints, no new tests required. Re-run existing suite after slice merge.
+- **E2E (Playwright):** 12 new specs in `e2e/specs/slice-20/` — 4 flows × 3 industries. Fixture workspace reuses Slice 19 reset mechanism. Specs live under `e2e/specs/slice-20/` to keep the slice's test artifacts grouped.
+- **Visual regression (Slice 19B):** re-run baseline — expect green (RBAC affordances don't appear for the `admin@novapay.com` visual baseline user because they're admin, so nothing changes visually). If new snapshots are needed, document in the slice PR.
+
+---
+
+**Files to create:**
+- `frontends/_shared/src/components/common/Toast.tsx`
+- `frontends/_shared/src/components/common/ToastProvider.tsx` + `useToast` hook
+- `frontends/_shared/src/__tests__/Toast.test.tsx`
+- `frontends/_shared/src/__tests__/FormView.test.tsx`
+- `frontends/_shared/src/__tests__/ColumnEditor.test.tsx`
+- `frontends/_shared/src/__tests__/BoardListPage.test.tsx`
+- `e2e/specs/slice-20/create-item-kanban.spec.ts` (runs across 3 industries via parametrization)
+- `e2e/specs/slice-20/create-item-form.spec.ts`
+- `e2e/specs/slice-20/inline-edit-status.spec.ts`
+- `e2e/specs/slice-20/delete-item.spec.ts`
+- `e2e/specs/slice-20/create-board.spec.ts`
+- `e2e/specs/slice-20/rbac-viewer.spec.ts` (proves viewer role sees no CRUD affordances)
+- `e2e/fixtures/slice-20-industries.ts` (industry matrix for parameterized tests)
+
+**Files to modify:**
+- `frontends/_shared/src/pages/BoardListPage.tsx` — wire toast for create-failure path (replace silent catch)
+- `frontends/_shared/src/components/board/KanbanView.tsx` — add `+ Add item` button per lane, kebab menu per card
+- `frontends/_shared/src/components/board/TableView.tsx` — add `+ Add item` in group headers, inline-edit wiring
+- `frontends/_shared/src/hooks/useBoard.ts` — add `createItem`, `updateItemValue`, `deleteItem` mutations
+- `frontends/_shared/src/utils/api.ts` — add typed `items.create` / `items.update` / `items.delete` / `items.updateValues` methods
+- `frontends/novapay/src/App.tsx` — mount `<ToastProvider>`, wire CRUD callbacks
+- `frontends/medvista/src/App.tsx` — mount `<ToastProvider>`, wire CRUD callbacks, adopt `BoardListPage` from shared
+- `frontends/jurispath/src/App.tsx` — mount `<ToastProvider>`, wire CRUD callbacks, adopt `BoardListPage` from shared
+- `SPEC.md` — this section
+
+---
+
+**Make targets (new):**
+- `make e2e:slice-20` — seed fixture workspace, run only `e2e/specs/slice-20/` against the 3 industries
+- `make test:shared` — run `@crm/shared` vitest suite (pre-merge gate for this slice)
+
+---
+
+**Out of scope:**
+- Router migration of the 9 state-based industries → separate cleanup slice after 20B
+- File upload UI (`files` column type) — Slice 21 candidate
+- Person column picker UI (needs workspace member search) — Slice 22 candidate
+- Formula column editing — read-only forever
+- Bulk actions (multi-select delete, bulk status change) — Slice 23 candidate
+- Board settings editor (rename, recolor, reorder columns, add/remove columns) — Slice 24 candidate
+- Automation rule builder UI → the rules are seeded; UI creation is a separate future slice
+- Per-board or per-column ACLs beyond the role-based check → separate security slice
+- CRUD for the remaining 7 industries → Slice 20B
+
+**Boundaries (slice-specific):**
+- Always: respect the `user.role` check for affordance visibility; never expose a CRUD button the server would 403 (except documented `member` delete-foreign case where UI is permissive and server enforces)
+- Always: validate column-type constraints client-side *and* rely on server as source of truth; surface server errors via toast
+- Always: use canonical `{label, color}` shape for Status column values written from the UI — matches Slice 19.7 B2 normalizer
+- Ask first: adding new shared components beyond `<Toast>` + `<ToastProvider>`; adding new backend endpoints (this slice is pure UI)
+- Ask first: changing RBAC matrix (especially granting `member` board-create, which has product implications)
+- Never: bypass the shared library for CRUD — every industry wires through `FormView` / `ColumnEditor` / `BoardListPage` so patterns stay uniform
+- Never: ship silent `catch` blocks; every error path emits a toast or inline error bar
+
+**Success criteria (slice-level):**
+- [ ] On NovaPay, MedVista, and JurisPath: admin user can create an item via Kanban `+` button; item appears without page reload
+- [ ] On NovaPay, MedVista, and JurisPath: admin user can click a Status cell on Table view and change the value; change persists after reload
+- [ ] On NovaPay, MedVista, and JurisPath: admin user can delete an item from Kanban kebab menu; item disappears and does not return after reload
+- [ ] On NovaPay, MedVista, and JurisPath: admin user can create a new Board from the sidebar; board appears in the sidebar list
+- [ ] Real-time: two browser tabs open, any CRUD in tab A reflects in tab B within 2 s (Socket.io echo)
+- [ ] Viewer role sees zero CRUD affordances on all 3 industries (verified by `rbac-viewer.spec.ts`)
+- [ ] All 12 Playwright specs in `e2e/specs/slice-20/` pass in CI and locally
+- [ ] `make test:shared` passes with new tests added (`+40` test count minimum)
+- [ ] No TypeScript errors on `novapay`, `medvista`, `jurispath`, or `_shared`
+- [ ] No visual regression on Slice 19B baseline
+
+---
+
 ## Success Criteria
 
 - [ ] All 18 vertical slices implemented and working
