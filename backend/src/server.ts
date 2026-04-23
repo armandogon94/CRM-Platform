@@ -2,8 +2,25 @@ import http from 'http';
 import app from './app';
 import config from './config';
 import { testConnection, runMigrations } from './config/database';
+import { assertPerfIsolation } from './config/safety-guards';
 import { logger } from './utils/logger';
 import { wsService } from './services/WebSocketService';
+
+// ---------------------------------------------------------------------------
+// Perf-mode safety guard (Slice 19C, Task A3)
+// ---------------------------------------------------------------------------
+// Runs BEFORE any I/O (DB connect, port bind) so a misconfigured perf run
+// aborts with a clear error instead of silently writing to dev/prod state.
+// No-op outside `NODE_ENV=perf`. See `config/safety-guards.ts` for details.
+try {
+  assertPerfIsolation();
+} catch (error) {
+  // Intentionally bypass the logger so the refusal message is visible even
+  // if the logger itself is misconfigured in perf mode.
+  // eslint-disable-next-line no-console
+  console.error((error as Error).message);
+  process.exit(1);
+}
 
 // ---------------------------------------------------------------------------
 // Create HTTP server
