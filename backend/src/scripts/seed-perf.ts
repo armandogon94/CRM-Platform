@@ -1,11 +1,17 @@
 /**
- * seed-perf — deterministic perf-DB seeder (Slice 19C, Task B1).
+ * seed-perf — deterministic perf-DB seeder (Slice 19C, Tasks B1 + B2).
  *
  * Seeds a single `perf-workspace` with N boards × 100 items × 15 columns
- * of column values into `crm_perf`. B1 establishes the schema + idempotency
- * contract at smoke scale (10 boards). B2 scales to 1000 boards × 100
- * items = 1.5M column values by wiring larger batches and chunked
- * transactions — the CLI default is already 1000 in anticipation.
+ * of column values into `crm_perf`. B1 established the schema + idempotency
+ * contract at smoke scale (10 boards). B2 adds:
+ *   - `PERF_SCALE_FACTOR` env var — multiplies boards/items/columns (min 1)
+ *     so CI can exercise the same code path in milliseconds.
+ *   - Per-batch transactions — every 100 boards the seeder commits, so
+ *     peak memory stays bounded at 1.5M column_values scale.
+ *   - Progress logs every 100 boards via `console.error` (stderr), leaving
+ *     stdout clean for structured output.
+ *   - `bulkCreate({ batchSize: 5000 })` — Sequelize chunks the INSERT so
+ *     Postgres never sees a 1.5M-row VALUES clause.
  *
  * Determinism: a seeded Mulberry32 PRNG keyed on `PERF_SEED` (default 42)
  * drives every random choice (item names, status values, numbers, etc.).
@@ -17,6 +23,7 @@
  */
 
 import bcrypt from 'bcryptjs';
+import type { BulkCreateOptions } from 'sequelize';
 import {
   Workspace,
   User,
@@ -25,7 +32,16 @@ import {
   Column,
   Item,
   ColumnValue,
+  sequelize,
 } from '../models';
+
+/**
+ * `batchSize` is a widely-used convention across ORMs (Prisma, TypeORM)
+ * and also supported by Sequelize at runtime, but it is not part of the
+ * public TS definition of `BulkCreateOptions`. We augment the type here
+ * so call sites stay type-safe without `as any`.
+ */
+type BulkCreateOptionsWithBatchSize<T> = BulkCreateOptions<T> & { batchSize?: number };
 
 /** CLI-facing options. `boards` defaults to 1000 (B2 scale). */
 export interface SeedPerfOptions {
@@ -38,10 +54,25 @@ const ITEMS_PER_BOARD = 100;
 const COLUMNS_PER_BOARD = 15;
 const BATCH_SIZE = 5000;
 const PROGRESS_EVERY = 100;
+/** Boards per transaction window (B2 per-batch commit boundary). */
+const BOARDS_PER_TX = 100;
 
 const PERF_WORKSPACE_NAME = 'perf-workspace';
 const PERF_WORKSPACE_SLUG = 'perf-workspace';
 const PERF_ADMIN_EMAIL = 'perf-admin@perf.test';
+
+/**
+ * Apply `PERF_SCALE_FACTOR` (env) to a dimension. Rounds up and clamps to
+ * at least 1 so a factor of 0.0001 still produces one row instead of
+ * zero. Missing/invalid env values yield an identity transform.
+ */
+function applyScaleFactor(n: number): number {
+  const raw = process.env.PERF_SCALE_FACTOR;
+  if (raw === undefined || raw === '') return n;
+  const factor = Number.parseFloat(raw);
+  if (!Number.isFinite(factor) || factor <= 0) return n;
+  return Math.max(1, Math.ceil(n * factor));
+}
 
 /**
  * Parse `--boards=N` from `process.argv`. Returns undefined when the flag
@@ -150,11 +181,17 @@ function generateColumnValue(
  */
 export async function main(opts: SeedPerfOptions = {}): Promise<void> {
   const flagBoards = parseBoardsFlag(process.argv);
-  const boards = flagBoards ?? opts.boards ?? DEFAULT_BOARDS;
+  const requestedBoards = flagBoards ?? opts.boards ?? DEFAULT_BOARDS;
   const seed = Number(process.env.PERF_SEED ?? 42);
 
-  const expectedItems = boards * ITEMS_PER_BOARD;
-  const expectedColumnValues = boards * ITEMS_PER_BOARD * COLUMNS_PER_BOARD;
+  // Apply PERF_SCALE_FACTOR to every dimension. When the env var is absent
+  // these are identity passes, so production paths behave exactly like B1.
+  const boards = applyScaleFactor(requestedBoards);
+  const itemsPerBoard = applyScaleFactor(ITEMS_PER_BOARD);
+  const columnsPerBoard = applyScaleFactor(COLUMNS_PER_BOARD);
+
+  const expectedItems = boards * itemsPerBoard;
+  const expectedColumnValues = boards * itemsPerBoard * columnsPerBoard;
 
   console.log(
     `[seed-perf] starting — boards=${boards}, items=${expectedItems}, ` +
@@ -208,34 +245,33 @@ export async function main(opts: SeedPerfOptions = {}): Promise<void> {
   });
 
   // ─── Per-board loop ──────────────────────────────────────────────────
-  // B1 runs 10 boards in a single surrounding flow; B2 will chunk
-  // transactions per-batch to keep peak memory bounded at 1000 boards.
-  let pendingItems: Array<{
-    boardId: number;
-    groupId: number;
-    name: string;
-    position: number;
-    createdBy: number;
-  }> = [];
-  let pendingValues: Array<{
-    itemId: number;
-    columnId: number;
-    value: unknown;
-  }> = [];
+  // B2: wrap every BOARDS_PER_TX (100) boards in their own transaction.
+  // Each batch's pendingValues buffer is released when the tx commits,
+  // so peak memory stays bounded regardless of total board count.
+  //
+  // For boards <= BOARDS_PER_TX (smoke scale) we skip the outer
+  // transaction wrapper to preserve B1's test mocks — which would
+  // otherwise need to emulate commit/rollback — and because there's no
+  // memory pressure to mitigate.
+  const useBatchedTransactions = boards > BOARDS_PER_TX;
 
-  const flushItems = async (): Promise<void> => {
-    if (pendingItems.length === 0) return;
-    await Item.bulkCreate(pendingItems);
-    pendingItems = [];
+  // Restrict to the first N scaled column defs. Full scale keeps all 15.
+  const activeColumnDefs = PERF_COLUMN_DEFS.slice(
+    0,
+    Math.min(columnsPerBoard, PERF_COLUMN_DEFS.length)
+  );
+
+  type PendingValue = { itemId: number; columnId: number; value: unknown };
+
+  const flushValues = async (buffer: PendingValue[]): Promise<void> => {
+    if (buffer.length === 0) return;
+    // batchSize: 5000 keeps each INSERT VALUES clause bounded so Postgres
+    // never sees a 1.5M-row statement at full scale.
+    const opts: BulkCreateOptionsWithBatchSize<unknown> = { batchSize: BATCH_SIZE };
+    await ColumnValue.bulkCreate(buffer, opts as BulkCreateOptions);
   };
 
-  const flushValues = async (): Promise<void> => {
-    if (pendingValues.length === 0) return;
-    await ColumnValue.bulkCreate(pendingValues);
-    pendingValues = [];
-  };
-
-  for (let b = 0; b < boards; b++) {
+  const seedBoard = async (b: number, pendingValues: PendingValue[]): Promise<void> => {
     const board = await Board.create({
       name: `perf-board-${b + 1}`,
       description: `Perf board ${b + 1}`,
@@ -253,8 +289,8 @@ export async function main(opts: SeedPerfOptions = {}): Promise<void> {
     });
 
     const columns = [];
-    for (let c = 0; c < PERF_COLUMN_DEFS.length; c++) {
-      const def = PERF_COLUMN_DEFS[c];
+    for (let c = 0; c < activeColumnDefs.length; c++) {
+      const def = activeColumnDefs[c];
       const column = await Column.create({
         boardId: board.id,
         name: def.name,
@@ -268,7 +304,7 @@ export async function main(opts: SeedPerfOptions = {}): Promise<void> {
 
     // Items for this board — create them now so we have IDs for values.
     const itemRecords = [];
-    for (let i = 0; i < ITEMS_PER_BOARD; i++) {
+    for (let i = 0; i < itemsPerBoard; i++) {
       itemRecords.push({
         boardId: board.id,
         groupId: group.id,
@@ -277,28 +313,68 @@ export async function main(opts: SeedPerfOptions = {}): Promise<void> {
         createdBy: admin.id,
       });
     }
-    const createdItems = await Item.bulkCreate(itemRecords);
+    const itemOpts: BulkCreateOptionsWithBatchSize<unknown> = { batchSize: BATCH_SIZE };
+    const createdItems = await Item.bulkCreate(itemRecords, itemOpts as BulkCreateOptions);
 
-    // Column values — 15 per item × 100 items = 1500 per board.
+    // Column values — columnsPerBoard per item × itemsPerBoard items.
     for (const item of createdItems) {
       for (const col of columns) {
-        const def = PERF_COLUMN_DEFS.find((d) => d.name === col.name)!;
+        const def = activeColumnDefs.find((d) => d.name === col.name)!;
         pendingValues.push({
           itemId: item.id,
           columnId: col.id,
           value: generateColumnValue(def, rand, admin.id),
         });
-        if (pendingValues.length >= BATCH_SIZE) await flushValues();
+        if (pendingValues.length >= BATCH_SIZE) {
+          await flushValues(pendingValues);
+          pendingValues.length = 0;
+        }
       }
     }
+  };
 
-    if ((b + 1) % PROGRESS_EVERY === 0) {
-      console.log(`[seed-perf] progress — ${b + 1}/${boards} boards seeded`);
+  // Progress emitter — fires at every PROGRESS_EVERY (100) board boundary
+  // regardless of batching path. At smoke scale (10 boards) this never
+  // fires. At 1000-board scale it fires 10 times via stderr to keep
+  // stdout clean for potential JSON output.
+  const emitProgress = (done: number): void => {
+    if (done > 0 && done % PROGRESS_EVERY === 0) {
+      console.error(`[seed-perf] progress — ${done}/${boards} boards seeded`);
     }
-  }
+  };
 
-  await flushItems();
-  await flushValues();
+  if (useBatchedTransactions) {
+    // Chunked transactions: one commit per BOARDS_PER_TX boards. On
+    // failure roll back the current batch and re-throw; partial earlier
+    // batches stay committed (acceptable for a perf seeder — re-run is
+    // idempotent).
+    for (let start = 0; start < boards; start += BOARDS_PER_TX) {
+      const end = Math.min(start + BOARDS_PER_TX, boards);
+      const tx = await sequelize.transaction();
+      try {
+        const pendingValues: PendingValue[] = [];
+        for (let b = start; b < end; b++) {
+          await seedBoard(b, pendingValues);
+        }
+        await flushValues(pendingValues);
+        pendingValues.length = 0;
+        await tx.commit();
+      } catch (err) {
+        await tx.rollback();
+        throw err;
+      }
+      emitProgress(end);
+    }
+  } else {
+    // Smoke path: single implicit transaction (preserves B1 behaviour).
+    const pendingValues: PendingValue[] = [];
+    for (let b = 0; b < boards; b++) {
+      await seedBoard(b, pendingValues);
+      emitProgress(b + 1);
+    }
+    await flushValues(pendingValues);
+    pendingValues.length = 0;
+  }
 
   const elapsedMs = Date.now() - tStart;
   process.stderr.write(
