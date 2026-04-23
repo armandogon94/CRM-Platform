@@ -5,6 +5,7 @@
   "description": "End-to-end Playwright tests for the CRM Platform",
   "scripts": {
     "test": "playwright test",
+    "test:visual": "playwright test --config=playwright.visual.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
