@@ -183,10 +183,41 @@ Phase E — Verification (sequential)
 
 ---
 
+### Task A2.5: Backend flat-route shims (DISCOVERED during A2)
+
+**Description:** Found during A2 build: `backend/src/routes/index.ts` exposes flat convenience routes for `POST /items`, `PUT /items/:id`, `PUT /items/:id/values`, but is missing `DELETE /items/:id` and `POST /boards`. The flat routes infer `workspaceId` from the authenticated user and are what every industry client actually calls (including the pre-existing `BoardListPage.tsx:33` which has been silently 404-ing behind an empty catch block). A2's typed client targets flat URLs per plan; without this shim the Phase C industry wiring will fail.
+
+**RED → GREEN flow:**
+1. Extend an existing backend jest route test (or add a minimal new one) asserting: authenticated `DELETE /api/v1/items/:id` returns 200 + soft-deletes; `POST /api/v1/boards` with valid body returns 201 + the new board.
+2. Add the two shim routes to `backend/src/routes/index.ts` (thin wrappers calling the same service/model code the nested routes use).
+
+**Acceptance criteria:**
+- [ ] `DELETE /api/v1/items/:id` authenticated + board-in-user-workspace → 200 + item soft-deleted (`deletedAt` set)
+- [ ] `DELETE /api/v1/items/:id` foreign board → 403
+- [ ] `DELETE /api/v1/items/:id` missing item → 404
+- [ ] `POST /api/v1/boards` with `{ name, description, workspaceId, boardType }` → 201 + `{ board }`
+- [ ] `POST /api/v1/boards` missing name → 400
+- [ ] Existing nested-route tests still pass
+
+**Verification:**
+- [ ] `cd backend && npm test -- --testPathPattern="routes"` — no regressions
+- [ ] `cd backend && npm run build` — clean
+
+**Dependencies:** A2 (so the client is typed against these endpoints). Must land before Phase C starts.
+
+**Files touched (≤3):**
+- `backend/src/routes/index.ts` (modify — add 2 shims)
+- `backend/src/__tests__/routes/flat-items-boards.test.ts` (new)
+
+**Size:** S
+
+---
+
 ### ✅ Checkpoint: Phase A foundation
 
-- [ ] A1–A4 all merged to `main` as separate commits
+- [ ] A1–A4 + A2.5 all merged to `main` as separate commits
 - [ ] `cd frontends/_shared && npm test && npm run typecheck` — 100% green
+- [ ] `cd backend && npm test -- --testPathPattern="routes"` — 100% green
 - [ ] Existing shared tests (theme, status from 19.7) still pass — no regressions
 - [ ] Review with human before proceeding to Phase B
 
