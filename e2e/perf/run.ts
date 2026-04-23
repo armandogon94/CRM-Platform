@@ -33,6 +33,7 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 
 // ---------------------------------------------------------------------------
@@ -419,29 +420,85 @@ function prune(outputDir: string): void {
  * we emit a warning and continue — perf runs must NOT fail just because
  * the renderer is unshipped.
  */
-async function invokeReportIfAvailable(deps: RunDeps, outputDir: string): Promise<void> {
+async function invokeReportIfAvailable(deps: RunDeps, outputDir: string): Promise<number> {
   try {
     // Relative to `run.ts`'s compiled location (dist/run.js), report lives
     // at dist/lib/report.js (tsc rootDir collapses to e2e/perf/).
-    //
-    // The module path is computed at runtime so tsc doesn't resolve it at
-    // compile time — F2 (`lib/report.ts`) lands in a sibling task and may
-    // not yet be committed when F1 builds. A literal `import('./lib/report')`
-    // would fail with TS2307 until F2 ships; the indirection defers the
-    // lookup to Node's runtime resolver, which cleanly throws an ERR_MODULE
-    // we catch below.
+    // Indirect the dynamic import so tsc doesn't resolve the path at build
+    // time (leaves the renderer an optional runtime dep).
     const modulePath = './lib/report';
     const dynamicImport = new Function('p', 'return import(p)') as (p: string) => Promise<unknown>;
     const mod = (await dynamicImport(modulePath)) as {
-      renderReport?: (outputDir: string) => Promise<void> | void;
+      renderReport?: (
+        results: unknown[],
+        baseline: string | null,
+        meta: {
+          commitSha: string;
+          nodeVersion: string;
+          dateIso: string;
+          host: { cpu: string; memMb: number };
+        }
+      ) => { markdown: string; shouldExit: number };
     };
-    if (typeof mod.renderReport === 'function') {
-      await mod.renderReport(outputDir);
-    } else {
+    if (typeof mod.renderReport !== 'function') {
       deps.err.write('[report] F2 renderReport() not exported yet — skipping.\n');
+      return 0;
     }
-  } catch {
-    deps.err.write('[report] F2 report.ts not present yet — skipping markdown render.\n');
+
+    // Assemble inputs. Walk outputDir for the latest scenario JSONs,
+    // parse them, pass the parsed objects as ScenarioResult[] shape.
+    const scenarioIds = ['a', 'b', 'c', 'd'] as const;
+    const results: Array<{ scenario: string; jsonPath: string; aggregate: unknown }> = [];
+    const entries = fs.readdirSync(outputDir);
+    for (const id of scenarioIds) {
+      const match = entries
+        .filter((f) => f.endsWith(`-scenario-${id}.json`))
+        .sort()
+        .pop();
+      if (!match) continue;
+      const jsonPath = path.join(outputDir, match);
+      try {
+        const raw = fs.readFileSync(jsonPath, 'utf8');
+        const parsed = JSON.parse(raw) as { aggregate?: unknown };
+        results.push({ scenario: id, jsonPath, aggregate: parsed.aggregate ?? parsed });
+      } catch (err) {
+        deps.err.write(`[report] failed to parse ${match}: ${(err as Error).message}\n`);
+      }
+    }
+
+    // Load baseline.md if present (non-fatal on miss).
+    const baselinePath = path.join(outputDir, 'baseline.md');
+    let baseline: string | null = null;
+    try {
+      baseline = fs.readFileSync(baselinePath, 'utf8');
+    } catch {
+      baseline = null;
+    }
+
+    const meta = {
+      commitSha: (process.env.GIT_COMMIT ?? 'unknown').slice(0, 12),
+      nodeVersion: process.version,
+      dateIso: new Date(deps.now()).toISOString(),
+      host: {
+        cpu: os.cpus()[0]?.model ?? 'unknown',
+        memMb: Math.round(os.totalmem() / 1024 / 1024),
+      },
+    };
+
+    const { markdown, shouldExit } = mod.renderReport(results, baseline, meta);
+
+    // Write the markdown to outputDir next to the raw JSON.
+    const stampIso = new Date(deps.now()).toISOString().replace(/[:.]/g, '-');
+    const mdPath = path.join(outputDir, `${stampIso}.md`);
+    fs.writeFileSync(mdPath, markdown, 'utf8');
+    deps.out.write(`[report] wrote ${mdPath}\n`);
+
+    return shouldExit ?? 0;
+  } catch (err) {
+    deps.err.write(
+      `[report] failed to render: ${(err as Error).message} — suite still exits cleanly.\n`
+    );
+    return 0;
   }
 }
 
@@ -491,10 +548,11 @@ export async function run(deps: RunDeps, argv: readonly string[]): Promise<numbe
   // Step 3: Prune.
   prune(absOutputDir);
 
-  // Step 4: Report (lazy; may no-op if F2 not yet shipped).
-  await invokeReportIfAvailable(deps, absOutputDir);
-
-  return 0;
+  // Step 4: Report (lazy; may no-op if F2 not yet shipped). Returns a
+  // non-zero exit when pass/fail SLOs were violated (cache hit, DB pool,
+  // WS connect, upload quota) — latency regressions are flag-only.
+  const reportExit = await invokeReportIfAvailable(deps, absOutputDir);
+  return reportExit;
 }
 
 // ---------------------------------------------------------------------------
