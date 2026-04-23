@@ -7,6 +7,8 @@ Multi-tenant work management platform with runtime-configurable boards, 8 view t
 [![PostgreSQL 15+](https://img.shields.io/badge/PostgreSQL-15+-4169E1?logo=postgresql&logoColor=white)](https://postgresql.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6+-3178C6?logo=typescript&logoColor=white)](https://typescriptlang.org/)
 
+Contributing? See [CONTRIBUTING.md](./CONTRIBUTING.md) for the E2E/visual-regression workflow and commit conventions.
+
 ## Core Differentiator
 
 **Entity-Attribute-Value (EAV) system** allows users to create, customize, and manage unlimited column types (Status, Text, Number, Date, Person, Dropdown, Timeline, Files, Formulas) at runtime — fully dynamic, no schema changes required.
