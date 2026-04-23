@@ -18,7 +18,8 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"],
+      "@crm/shared/*": ["../_shared/src/*"]
     }
   },
   "include": ["src"]
