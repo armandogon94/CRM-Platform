@@ -1,0 +1,100 @@
+[
+  {
+    "t": "2026-04-23T03:57:25.731Z",
+    "method": "POST",
+    "path": "/api/v1/auth/login",
+    "status": 200,
+    "elapsedMs": 230,
+    "response": {
+      "success": true,
+      "data": {
+        "user": {
+          "id": 1,
+          "email": "admin@jurispath.com",
+          "firstName": "Victoria",
+          "lastName": "Harrington",
+          "avatar": null,
+          "workspaceId": 1,
+          "role": "admin",
+          "isActive": true,
+          "lastLoginAt": "2026-04-23T03:57:25.724Z",
+          "createdAt": "2026-04-23T03:57:11.792Z",
+          "updatedAt": "2026-04-23T03:57:25.724Z",
+          "deletedAt": null,
+          "workspace_id": 1
+        },
+        "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImVtYWlsIjoiYWRtaW5AanVyaXNwYXRoLmNvbSIsIndvcmtzcGFjZUlkIjoxLCJyb2xlIjoiYWRtaW4iLCJmaXJzdE5hbWUiOiJWaWN0b3JpYSIsImxhc3ROYW1lIjoiSGFycmluZ3RvbiIsImlhdCI6MTc3NjkxNjY0NSwiZXhwIjoxNzc2OTIwMjQ1fQ.L2Z67t-MsdO5_5rDkjgnFOjR2abdyI8O7WULXHKN8w0",
+        "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImlhdCI6MTc3NjkxNjY0NSwiZXhwIjoxNzc3NTIxNDQ1fQ.7CSK-LFu9JR8iy0-HKfOczFqrojvQpgHVmFYdy6xaE8"
+      },
+      "message": "Login successful"
+    }
+  },
+  {
+    "t": "2026-04-23T03:57:25.744Z",
+    "method": "POST",
+    "path": "/api/v1/workspaces/1/boards",
+    "status": 201,
+    "elapsedMs": 13,
+    "response": {
+      "success": true,
+      "data": {
+        "id": 4,
+        "name": "Slice 19.7 QA Board",
+        "description": "Created by the Slice 19.7 QA harness.",
+        "workspaceId": 1,
+        "createdBy": 1,
+        "boardType": "main",
+        "isTemplate": false,
+        "settings": {},
+        "createdAt": "2026-04-23T03:57:25.735Z",
+        "updatedAt": "2026-04-23T03:57:25.735Z",
+        "deletedAt": null,
+        "workspace_id": 1,
+        "created_by": 1,
+        "groups": [
+          {
+            "id": 14,
+            "boardId": 4,
+            "name": "New Group",
+            "color": "#579BFC",
+            "position": 0,
+            "isCollapsed": false,
+            "createdAt": "2026-04-23T03:57:25.736Z",
+            "updatedAt": "2026-04-23T03:57:25.736Z",
+            "deletedAt": null,
+            "board_id": 4
+          }
+        ],
+        "columns": [],
+        "views": [
+          {
+            "id": 7,
+            "name": "Main Table",
+            "viewType": "table",
+            "isDefault": true
+          }
+        ]
+      },
+      "message": "Board created"
+    }
+  },
+  {
+    "t": "2026-04-23T03:57:25.747Z",
+    "method": "GET",
+    "path": "/api/v1/notifications",
+    "status": 200,
+    "elapsedMs": 2,
+    "response": {
+      "success": true,
+      "data": {
+        "notifications": [],
+        "pagination": {
+          "page": 1,
+          "limit": 20,
+          "total": 0,
+          "totalPages": 0
+        }
+      }
+    }
+  }
+]

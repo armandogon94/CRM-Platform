@@ -1,0 +1,100 @@
+[
+  {
+    "t": "2026-04-23T03:45:06.020Z",
+    "method": "POST",
+    "path": "/api/v1/auth/login",
+    "status": 200,
+    "elapsedMs": 252,
+    "response": {
+      "success": true,
+      "data": {
+        "user": {
+          "id": 13,
+          "email": "admin@medvista.com",
+          "firstName": "Amanda",
+          "lastName": "Foster",
+          "avatar": null,
+          "workspaceId": 1,
+          "role": "admin",
+          "isActive": true,
+          "lastLoginAt": "2026-04-23T03:45:06.013Z",
+          "createdAt": "2026-04-23T03:44:50.312Z",
+          "updatedAt": "2026-04-23T03:45:06.013Z",
+          "deletedAt": null,
+          "workspace_id": 1
+        },
+        "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEzLCJlbWFpbCI6ImFkbWluQG1lZHZpc3RhLmNvbSIsIndvcmtzcGFjZUlkIjoxLCJyb2xlIjoiYWRtaW4iLCJmaXJzdE5hbWUiOiJBbWFuZGEiLCJsYXN0TmFtZSI6IkZvc3RlciIsImlhdCI6MTc3NjkxNTkwNiwiZXhwIjoxNzc2OTE5NTA2fQ.VnXwSDZjdu6-nJOhQ-dlCLKpJHFox3MZ7N7dhWHaMZI",
+        "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEzLCJpYXQiOjE3NzY5MTU5MDYsImV4cCI6MTc3NzUyMDcwNn0.3Lb2QPqQc_gC3AXFtZ8OOXYo_RfdLpt4i2E1wb8U2Sc"
+      },
+      "message": "Login successful"
+    }
+  },
+  {
+    "t": "2026-04-23T03:45:06.035Z",
+    "method": "POST",
+    "path": "/api/v1/workspaces/1/boards",
+    "status": 201,
+    "elapsedMs": 15,
+    "response": {
+      "success": true,
+      "data": {
+        "id": 4,
+        "name": "Slice 19.7 QA Board",
+        "description": "Created by the Slice 19.7 QA harness.",
+        "workspaceId": 1,
+        "createdBy": 13,
+        "boardType": "main",
+        "isTemplate": false,
+        "settings": {},
+        "createdAt": "2026-04-23T03:45:06.024Z",
+        "updatedAt": "2026-04-23T03:45:06.024Z",
+        "deletedAt": null,
+        "workspace_id": 1,
+        "created_by": 13,
+        "groups": [
+          {
+            "id": 15,
+            "boardId": 4,
+            "name": "New Group",
+            "color": "#579BFC",
+            "position": 0,
+            "isCollapsed": false,
+            "createdAt": "2026-04-23T03:45:06.027Z",
+            "updatedAt": "2026-04-23T03:45:06.027Z",
+            "deletedAt": null,
+            "board_id": 4
+          }
+        ],
+        "columns": [],
+        "views": [
+          {
+            "id": 9,
+            "name": "Main Table",
+            "viewType": "table",
+            "isDefault": true
+          }
+        ]
+      },
+      "message": "Board created"
+    }
+  },
+  {
+    "t": "2026-04-23T03:45:06.039Z",
+    "method": "GET",
+    "path": "/api/v1/notifications",
+    "status": 200,
+    "elapsedMs": 4,
+    "response": {
+      "success": true,
+      "data": {
+        "notifications": [],
+        "pagination": {
+          "page": 1,
+          "limit": 20,
+          "total": 0,
+          "totalPages": 0
+        }
+      }
+    }
+  }
+]

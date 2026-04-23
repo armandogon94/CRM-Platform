@@ -11,3 +11,18 @@ export async function seedMedVista(): Promise<void> {
   await seedMedVistaAutomations(ctx, boards);
   console.log('=== MedVista seeding complete ===');
 }
+
+if (require.main === module) {
+  // Import models to register associations before seeding
+  import('../../models/index').then(() => {
+    (async () => {
+      try {
+        await seedMedVista();
+        process.exit(0);
+      } catch (err) {
+        console.error(err);
+        process.exit(1);
+      }
+    })();
+  });
+}

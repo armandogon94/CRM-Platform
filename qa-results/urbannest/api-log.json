@@ -1,0 +1,100 @@
+[
+  {
+    "t": "2026-04-23T03:49:24.207Z",
+    "method": "POST",
+    "path": "/api/v1/auth/login",
+    "status": 200,
+    "elapsedMs": 237,
+    "response": {
+      "success": true,
+      "data": {
+        "user": {
+          "id": 1,
+          "email": "admin@urbannest.com",
+          "firstName": "Rachel",
+          "lastName": "Thornton",
+          "avatar": null,
+          "workspaceId": 1,
+          "role": "admin",
+          "isActive": true,
+          "lastLoginAt": "2026-04-23T03:49:24.199Z",
+          "createdAt": "2026-04-23T03:49:08.935Z",
+          "updatedAt": "2026-04-23T03:49:24.199Z",
+          "deletedAt": null,
+          "workspace_id": 1
+        },
+        "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImVtYWlsIjoiYWRtaW5AdXJiYW5uZXN0LmNvbSIsIndvcmtzcGFjZUlkIjoxLCJyb2xlIjoiYWRtaW4iLCJmaXJzdE5hbWUiOiJSYWNoZWwiLCJsYXN0TmFtZSI6IlRob3JudG9uIiwiaWF0IjoxNzc2OTE2MTY0LCJleHAiOjE3NzY5MTk3NjR9.ftJzaYB6ACEvFIBrMgW5u1LpzCpoy4SkdAeGuOSmMSk",
+        "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImlhdCI6MTc3NjkxNjE2NCwiZXhwIjoxNzc3NTIwOTY0fQ.93iXR71PIJ-cHFhTTohalKxZ6ZV1J4smsrHuoJWl3AI"
+      },
+      "message": "Login successful"
+    }
+  },
+  {
+    "t": "2026-04-23T03:49:24.220Z",
+    "method": "POST",
+    "path": "/api/v1/workspaces/1/boards",
+    "status": 201,
+    "elapsedMs": 12,
+    "response": {
+      "success": true,
+      "data": {
+        "id": 4,
+        "name": "Slice 19.7 QA Board",
+        "description": "Created by the Slice 19.7 QA harness.",
+        "workspaceId": 1,
+        "createdBy": 1,
+        "boardType": "main",
+        "isTemplate": false,
+        "settings": {},
+        "createdAt": "2026-04-23T03:49:24.212Z",
+        "updatedAt": "2026-04-23T03:49:24.212Z",
+        "deletedAt": null,
+        "workspace_id": 1,
+        "created_by": 1,
+        "groups": [
+          {
+            "id": 14,
+            "boardId": 4,
+            "name": "New Group",
+            "color": "#579BFC",
+            "position": 0,
+            "isCollapsed": false,
+            "createdAt": "2026-04-23T03:49:24.214Z",
+            "updatedAt": "2026-04-23T03:49:24.214Z",
+            "deletedAt": null,
+            "board_id": 4
+          }
+        ],
+        "columns": [],
+        "views": [
+          {
+            "id": 9,
+            "name": "Main Table",
+            "viewType": "table",
+            "isDefault": true
+          }
+        ]
+      },
+      "message": "Board created"
+    }
+  },
+  {
+    "t": "2026-04-23T03:49:24.223Z",
+    "method": "GET",
+    "path": "/api/v1/notifications",
+    "status": 200,
+    "elapsedMs": 3,
+    "response": {
+      "success": true,
+      "data": {
+        "notifications": [],
+        "pagination": {
+          "page": 1,
+          "limit": 20,
+          "total": 0,
+          "totalPages": 0
+        }
+      }
+    }
+  }
+]

@@ -58,7 +58,9 @@ export async function seedCraneStack(): Promise<void> {
 
     // ─── 3. Users ────────────────────────────────────────────────────────
     log('Creating users...');
-    const adminHash = await hashPassword('admin');
+    // Unified with the other 9 industries: admin password is `demo123`
+    // so the cross-industry QA harness + demo credentials stay consistent.
+    const adminHash = await hashPassword('demo123');
     const demoHash = await hashPassword('demo123');
 
     const adminUser = await User.create(

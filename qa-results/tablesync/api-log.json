@@ -1,0 +1,100 @@
+[
+  {
+    "t": "2026-04-23T03:57:53.572Z",
+    "method": "POST",
+    "path": "/api/v1/auth/login",
+    "status": 200,
+    "elapsedMs": 228,
+    "response": {
+      "success": true,
+      "data": {
+        "user": {
+          "id": 1,
+          "email": "admin@tablesync.com",
+          "firstName": "Marco",
+          "lastName": "DeLuca",
+          "avatar": null,
+          "workspaceId": 1,
+          "role": "admin",
+          "isActive": true,
+          "lastLoginAt": "2026-04-23T03:57:53.567Z",
+          "createdAt": "2026-04-23T03:57:39.545Z",
+          "updatedAt": "2026-04-23T03:57:53.567Z",
+          "deletedAt": null,
+          "workspace_id": 1
+        },
+        "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImVtYWlsIjoiYWRtaW5AdGFibGVzeW5jLmNvbSIsIndvcmtzcGFjZUlkIjoxLCJyb2xlIjoiYWRtaW4iLCJmaXJzdE5hbWUiOiJNYXJjbyIsImxhc3ROYW1lIjoiRGVMdWNhIiwiaWF0IjoxNzc2OTE2NjczLCJleHAiOjE3NzY5MjAyNzN9.A7nxTgIlrCQuRUfsv742PcG7pN_GOauy3wr59TPpN4Y",
+        "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEsImlhdCI6MTc3NjkxNjY3MywiZXhwIjoxNzc3NTIxNDczfQ.O0HLg_q3kCcc91sRRv0YBKhMIxzBEtawg0O_XQsMVzI"
+      },
+      "message": "Login successful"
+    }
+  },
+  {
+    "t": "2026-04-23T03:57:53.584Z",
+    "method": "POST",
+    "path": "/api/v1/workspaces/1/boards",
+    "status": 201,
+    "elapsedMs": 11,
+    "response": {
+      "success": true,
+      "data": {
+        "id": 4,
+        "name": "Slice 19.7 QA Board",
+        "description": "Created by the Slice 19.7 QA harness.",
+        "workspaceId": 1,
+        "createdBy": 1,
+        "boardType": "main",
+        "isTemplate": false,
+        "settings": {},
+        "createdAt": "2026-04-23T03:57:53.577Z",
+        "updatedAt": "2026-04-23T03:57:53.577Z",
+        "deletedAt": null,
+        "workspace_id": 1,
+        "created_by": 1,
+        "groups": [
+          {
+            "id": 15,
+            "boardId": 4,
+            "name": "New Group",
+            "color": "#579BFC",
+            "position": 0,
+            "isCollapsed": false,
+            "createdAt": "2026-04-23T03:57:53.578Z",
+            "updatedAt": "2026-04-23T03:57:53.578Z",
+            "deletedAt": null,
+            "board_id": 4
+          }
+        ],
+        "columns": [],
+        "views": [
+          {
+            "id": 9,
+            "name": "Main Table",
+            "viewType": "table",
+            "isDefault": true
+          }
+        ]
+      },
+      "message": "Board created"
+    }
+  },
+  {
+    "t": "2026-04-23T03:57:53.588Z",
+    "method": "GET",
+    "path": "/api/v1/notifications",
+    "status": 200,
+    "elapsedMs": 4,
+    "response": {
+      "success": true,
+      "data": {
+        "notifications": [],
+        "pagination": {
+          "page": 1,
+          "limit": 20,
+          "total": 0,
+          "totalPages": 0
+        }
+      }
+    }
+  }
+]

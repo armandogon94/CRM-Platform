@@ -65,7 +65,7 @@ function renderCellValue(column: Column, value: unknown): React.ReactNode {
       return (
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 bg-brand-100 text-brand-700 rounded-full flex items-center justify-center text-xs font-medium">
-            {name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+            {(name ?? "?").split(' ').map((n) => n[0]).join('').slice(0, 2)}
           </div>
           <span className="text-sm">{name}</span>
         </div>

@@ -106,6 +106,7 @@ export function Sidebar({ activeBoard, onBoardSelect, boards }: SidebarProps) {
           </div>
           <button
             onClick={logout}
+            aria-label="Sign out"
             className="text-brand-300 hover:text-white transition-colors"
             title="Sign out"
           >

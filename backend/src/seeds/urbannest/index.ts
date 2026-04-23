@@ -33,3 +33,18 @@ export async function seedUrbanNest(): Promise<void> {
   console.log('  3. Showing Scheduler   (3 groups, 8 columns, 30 showings)');
   console.log('  4 automation rules active');
 }
+
+if (require.main === module) {
+  // Import models to register associations before seeding
+  import('../../models/index').then(() => {
+    (async () => {
+      try {
+        await seedUrbanNest();
+        process.exit(0);
+      } catch (err) {
+        console.error(err);
+        process.exit(1);
+      }
+    })();
+  });
+}
