@@ -1,38 +1,12 @@
-# ---- Dev Stage ----
-FROM node:20-alpine AS dev
-
+FROM node:20-alpine AS build
 WORKDIR /app
-
 COPY package*.json ./
-
 RUN npm install
-
-COPY . .
-
-EXPOSE 13004
-
-CMD ["npm", "run", "dev", "--", "--host"]
-
-# ---- Build Stage ----
-FROM node:20-alpine AS builder
-
-WORKDIR /app
-
-COPY package*.json ./
-RUN npm ci
-
 COPY . .
 RUN npm run build
 
-# ---- Prod Stage ----
-FROM node:20-alpine AS prod
-
-WORKDIR /app
-
-RUN npm install -g serve
-
-COPY --from=builder /app/dist ./dist
-
+FROM nginx:alpine
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 13004
-
-CMD ["serve", "-s", "dist", "-l", "13004"]
+CMD ["nginx", "-g", "daemon off;"]
