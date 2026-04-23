@@ -1,21 +1,29 @@
 import { Sequelize, Options } from 'sequelize';
 import dotenv from 'dotenv';
+import { isPerfMode, perfDatabaseName } from './perf';
 
 dotenv.config();
 
 const isDevEnvironment = process.env.NODE_ENV === 'development';
+const perfEnvironment = isPerfMode();
 
+// Perf mode (Slice 19C, Task A2) widens the pool so Artillery's concurrent
+// VUs don't queue on `pool.acquire`, silences SQL logging (logging I/O
+// skews latency measurements), and targets the isolated `crm_perf`
+// database so dev/prod data is never touched. All other environments keep
+// their prior behaviour — this is a strictly additive branch.
 const dbConfig: Options = {
   host: process.env.DB_HOST || 'localhost',
   port: parseInt(process.env.DB_PORT || '5432', 10),
   dialect: 'postgres',
-  logging: isDevEnvironment ? (msg: string) => console.log(`[SQL] ${msg}`) : false,
-  pool: {
-    min: 2,
-    max: 10,
-    acquire: 30000,
-    idle: 10000,
-  },
+  logging: perfEnvironment
+    ? false
+    : isDevEnvironment
+    ? (msg: string) => console.log(`[SQL] ${msg}`)
+    : false,
+  pool: perfEnvironment
+    ? { min: 0, max: 20, acquire: 30000, idle: 10000 }
+    : { min: 2, max: 10, acquire: 30000, idle: 10000 },
   define: {
     timestamps: true,
     underscored: true,
@@ -23,8 +31,10 @@ const dbConfig: Options = {
   },
 };
 
+const defaultDatabaseName = perfEnvironment ? perfDatabaseName : 'crm_platform';
+
 const sequelize = new Sequelize(
-  process.env.DB_NAME || 'crm_platform',
+  process.env.DB_NAME || defaultDatabaseName,
   process.env.DB_USER || 'crm_admin',
   process.env.DB_PASSWORD || 'crm_secret_2026',
   dbConfig
