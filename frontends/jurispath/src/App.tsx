@@ -129,7 +129,12 @@ function AppContent() {
       );
     }
     return (
-      <BoardPage board={currentBoard} items={currentItems} loading={boardLoading} />
+      <BoardPage
+        board={currentBoard}
+        items={currentItems}
+        loading={boardLoading}
+        onItemsChange={setCurrentItems}
+      />
     );
   };
 

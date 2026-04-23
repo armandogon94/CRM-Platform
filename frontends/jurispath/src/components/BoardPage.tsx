@@ -1,18 +1,136 @@
-import { useState } from 'react';
-import { Table, LayoutGrid, Search, Filter, Plus } from 'lucide-react';
-import { BoardTable } from './BoardTable';
-import { KanbanView } from './KanbanView';
-import type { Board, Item } from '../types';
+import { useCallback, useMemo, useState } from 'react';
+import { Table, LayoutGrid, Search, Filter } from 'lucide-react';
+import { BoardView } from '@crm/shared/components/board/BoardView';
+import { useToast } from '@crm/shared/components/common/ToastProvider';
+import { api } from '../utils/api';
+import type { Board, Item, BoardView as BoardViewType } from '../types';
+
+/**
+ * JurisPath state-based board page (Slice 20 C3 CRUD wiring).
+ *
+ * JurisPath uses `activeView` state in App.tsx for navigation rather
+ * than react-router — so the parent owns both the selected board and
+ * its items. C3 keeps that arrangement but accepts an `onItemsChange`
+ * dispatcher so this component can run optimistic updates with
+ * rollback semantics against the parent's state.
+ *
+ * CRUD wiring (mirrors NovaPay C1):
+ *
+ *   - onItemCreate → POST /items
+ *   - onItemUpdate → PUT /items/:id/values (optimistic + rollback)
+ *   - onItemDelete → DELETE /items/:id  (optimistic + rollback)
+ *
+ * Every failure emits a toast via the shared <ToastProvider> mounted
+ * in main.tsx. JurisPath's 3-board domain (cases, clients, invoices)
+ * exercises the shared components against three distinct Status
+ * workflows without any per-board special-casing in this layer.
+ *
+ * Kept JurisPath's local api.ts rather than swapping to the shared
+ * useBoard hook — the shared hook hardcodes `crm_access_token` while
+ * JurisPath uses `jurispath_token`. Same trade-off NovaPay's C1
+ * accepted; unifying token keys is tracked as a future cleanup.
+ */
 
 interface BoardPageProps {
   board: Board | null;
   items: Item[];
   loading: boolean;
+  onItemsChange?: React.Dispatch<React.SetStateAction<Item[]>>;
 }
 
-export function BoardPage({ board, items, loading }: BoardPageProps) {
+export function BoardPage({ board, items, loading, onItemsChange }: BoardPageProps) {
   const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table');
   const [searchQuery, setSearchQuery] = useState('');
+  const { show: showToast } = useToast();
+
+  // ── CRUD handlers threaded to <BoardView> ──────────────────────────
+  //
+  // Using JurisPath's existing `api` client + parent-owned state.
+  // onItemsChange is optional so the component stays usable in any
+  // future caller that only needs a read-only board — but whenever
+  // AppContent wires it in, the full optimistic flow applies.
+
+  const handleItemCreate = useCallback(
+    async (groupId: number, name: string) => {
+      if (!board) return;
+      const res = await api.createItem({ boardId: board.id, groupId, name });
+      if (res.success && res.data?.item) {
+        onItemsChange?.((prev) => [...prev, res.data!.item as Item]);
+      } else {
+        showToast({
+          variant: 'error',
+          title: 'Could not create item',
+          description: res.error ?? 'Please try again.',
+        });
+      }
+    },
+    [board, onItemsChange, showToast]
+  );
+
+  const handleItemUpdate = useCallback(
+    async (itemId: number, columnId: number, value: unknown) => {
+      const snapshot = items;
+      onItemsChange?.((prev) =>
+        prev.map((it) => {
+          if (it.id !== itemId) return it;
+          const cvs = it.columnValues ?? [];
+          const idx = cvs.findIndex((c) => c.columnId === columnId);
+          const nextCvs =
+            idx >= 0
+              ? cvs.map((c) =>
+                  c.columnId === columnId ? { ...c, value } : c
+                )
+              : [
+                  ...cvs,
+                  { id: -1, itemId, columnId, value } as (typeof cvs)[number],
+                ];
+          return { ...it, columnValues: nextCvs };
+        })
+      );
+      const res = await api.updateColumnValues(itemId, [{ columnId, value }]);
+      if (!res.success) {
+        onItemsChange?.(snapshot);
+        showToast({
+          variant: 'error',
+          title: 'Could not update value',
+          description: res.error ?? 'Please try again.',
+        });
+      }
+    },
+    [items, onItemsChange, showToast]
+  );
+
+  const handleItemDelete = useCallback(
+    async (itemId: number) => {
+      const snapshot = items;
+      onItemsChange?.((prev) => prev.filter((i) => i.id !== itemId));
+      const res = await api.deleteItem(itemId);
+      if (!res.success) {
+        onItemsChange?.(snapshot);
+        showToast({
+          variant: 'error',
+          title: 'Could not delete item',
+          description: res.error ?? 'Please try again.',
+        });
+      }
+    },
+    [items, onItemsChange, showToast]
+  );
+
+  // Shared BoardView expects a `currentView: BoardView` prop matching
+  // the selected UI mode — synthesise a minimal one from local state
+  // rather than pulling the full BoardView list from the API.
+  const currentView: BoardViewType = useMemo(
+    () => ({
+      id: viewMode === 'table' ? 1 : 2,
+      boardId: board?.id ?? 0,
+      name: viewMode === 'table' ? 'Table' : 'Kanban',
+      viewType: viewMode,
+      settings: {},
+      isDefault: false,
+    }),
+    [viewMode, board?.id]
+  );
 
   if (loading) {
     return (
@@ -45,10 +163,6 @@ export function BoardPage({ board, items, loading }: BoardPageProps) {
             <p className="text-sm text-gray-500 mt-0.5">{board.description}</p>
           )}
         </div>
-        <button className="btn-primary flex items-center gap-1.5 text-sm">
-          <Plus size={16} />
-          New Item
-        </button>
       </div>
 
       <div className="flex items-center justify-between gap-4">
@@ -96,12 +210,18 @@ export function BoardPage({ board, items, loading }: BoardPageProps) {
         </div>
       </div>
 
+      {/* Board Content — Slice 20 C3 uses shared BoardView so CRUD
+          affordances (inline + Add item / kebab delete / inline edit)
+          are consistent with every future industry migration. */}
       <div className="card p-4">
-        {viewMode === 'table' ? (
-          <BoardTable board={board} items={filteredItems} />
-        ) : (
-          <KanbanView board={board} items={filteredItems} />
-        )}
+        <BoardView
+          board={board as unknown as Parameters<typeof BoardView>[0]['board']}
+          items={filteredItems as unknown as Parameters<typeof BoardView>[0]['items']}
+          currentView={currentView as unknown as Parameters<typeof BoardView>[0]['currentView']}
+          onItemCreate={handleItemCreate}
+          onItemUpdate={handleItemUpdate}
+          onItemDelete={handleItemDelete}
+        />
       </div>
 
       <div className="flex items-center gap-4 text-xs text-gray-400">

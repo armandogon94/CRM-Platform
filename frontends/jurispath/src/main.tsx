@@ -2,17 +2,19 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { AuthProvider } from './context/AuthContext';
+import { ToastProvider } from '@crm/shared/components/common/ToastProvider';
 import './styles/globals.css';
 
-// Slice 20 C0 sanity import — proves @crm/shared resolves via tsconfig
-// path + vite alias. Replaced by real usage (ToastProvider mount) in C1.
-import { INDUSTRY_THEMES } from '@crm/shared/theme';
-void INDUSTRY_THEMES;
-
+// <ToastProvider> mounts once at the root so every view (overview,
+// automations, per-board) can call `useToast()` through the same
+// surface. Required by the shared BoardView CRUD callbacks wired in
+// C3 — every failure path emits a toast here.
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <AuthProvider>
-      <App />
+      <ToastProvider>
+        <App />
+      </ToastProvider>
     </AuthProvider>
   </React.StrictMode>
 );
