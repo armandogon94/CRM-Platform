@@ -1,0 +1,179 @@
+# Slice 19C — Scenario (a): REST mixed CRUD at 100 RPS × 10 min.
+#
+# SPEC §19C, Scenario (a): 60/30/10 read/write/delete mix with 50 VUs;
+# targets p50<100ms, p95<500ms, p99<1000ms at 100 RPS sustained.
+#
+# Phase selection is driven by Artillery's `--environment` flag, which the
+# F1 orchestrator picks based on PERF_SHORT_RUN:
+#   --environment short  → 30s at 20 RPS (CI / smoke)
+#   --environment full   → warmup 30s ramping 0→100 RPS, sustain 10 min @ 100
+#
+# Running without --environment is intentionally unsupported: the top-level
+# `phases` block below is left empty so the orchestrator must opt in. This
+# prevents `artillery run` from silently executing a 10-min full-load test
+# against a developer laptop.
+#
+# Endpoint notes:
+#   - POST   /api/v1/items              — flat "create item" (auth required)
+#   - PUT    /api/v1/items/:id/values   — batch column-value update; the SPEC
+#                                         calls it `PATCH /column-values`
+#                                         conceptually, but the implemented
+#                                         verb is PUT (see backend/src/routes/
+#                                         index.ts). Using the real endpoint.
+#   - DELETE /api/v1/workspaces/:ws/boards/:bid/items/:id — soft delete
+#                                         (no flat DELETE /items route exists).
+#   - GET    /api/v1/boards/:boardId/items — list items on a board
+#   - GET    /api/v1/boards/:id         — board with columns/groups/views
+#
+# Board-selection strategy:
+#   The F1 orchestrator exports PERF_WORKSPACE_ID and PERF_BOARD_ID before
+#   invoking `artillery run`. A shared board per run is sufficient for
+#   Scenario (a)'s aim — p50/p95/p99 at sustained load — because the seed
+#   dataset makes every board interchangeable (identical shape & row count).
+#   Per-VU deterministic board spread (via fixtures.pickRandomBoard) is a
+#   later enhancement; the D2 helper is already in place when we need it.
+
+config:
+  target: "{{ $processEnvironment.BACKEND_URL }}"
+
+  http:
+    timeout: 30
+    pool: 50
+
+  # fixtures.ts compiles to dist/fixtures.js (see common.yml for the rootDir
+  # rationale). Scenario YAML sits under artillery/, so the processor path
+  # is resolved relative to Artillery's invocation directory (e2e/perf/).
+  processor: "../dist/fixtures.js"
+
+  # Phase durations differ wildly between CI smoke and full load runs, so
+  # we defer phase selection to the --environment flag. The top-level
+  # `phases` list stays empty on purpose — see header comment.
+  phases: []
+
+  environments:
+    # Short / smoke / CI: 30 s sustained at 20 RPS. Enough traffic for the
+    # scenario-a.test.ts validator to observe >100 requests and a
+    # method-distribution signal, without burning CI minutes.
+    short:
+      phases:
+        - name: "short-sustain"
+          duration: 30
+          arrivalRate: 20
+
+    # Full production-like load: warmup ramps from 0→100 RPS over 30 s,
+    # then sustains 100 RPS for 10 min. Matches SPEC §19C Scenario (a).
+    full:
+      phases:
+        - name: "warmup-ramp"
+          duration: 30
+          arrivalRate: 1
+          rampTo: 100
+        - name: "sustain-100rps"
+          duration: 600
+          arrivalRate: 100
+
+  # Default HTTP headers applied to every request. Authorization is added
+  # per-request below because {{ authToken }} is only populated after
+  # `beforeScenario: "setAuthToken"` runs.
+  defaults:
+    headers:
+      content-type: "application/json"
+
+  variables:
+    # The F1 orchestrator resolves and exports these before invoking
+    # `artillery run`. Defaults here keep the YAML parseable and let the
+    # scenario-a.test.ts shape check pass without env wiring.
+    workspaceId:
+      - "{{ $processEnvironment.PERF_WORKSPACE_ID }}"
+    boardId:
+      - "{{ $processEnvironment.PERF_BOARD_ID }}"
+
+# Weights encode the 60/30/10 mix. Artillery samples scenarios per VU
+# session according to weight, so observed request-method distribution over
+# a long enough window approaches these ratios.
+scenarios:
+  # -----------------------------------------------------------------------
+  # 60% READ — list items on a board, then fetch the board detail.
+  # Two GETs per session is representative of board-view traffic where the
+  # client fetches both shape (board) and data (items) in quick succession.
+  # -----------------------------------------------------------------------
+  - name: "read-items-and-board"
+    weight: 60
+    beforeScenario: "setAuthToken"
+    flow:
+      - get:
+          url: "/api/v1/boards/{{ boardId }}/items"
+          headers:
+            authorization: "Bearer {{ authToken }}"
+          expect:
+            - statusCode: [200, 304]
+      - get:
+          url: "/api/v1/boards/{{ boardId }}"
+          headers:
+            authorization: "Bearer {{ authToken }}"
+          expect:
+            - statusCode: [200, 304]
+
+  # -----------------------------------------------------------------------
+  # 30% WRITE — create an item then update one of its column values.
+  # Captures the item id from the POST response so the follow-up PUT hits
+  # the row we just created (exercises the create → update code path, not
+  # just isolated writes).
+  # -----------------------------------------------------------------------
+  - name: "write-create-then-update"
+    weight: 30
+    beforeScenario: "setAuthToken"
+    flow:
+      - post:
+          url: "/api/v1/items"
+          headers:
+            authorization: "Bearer {{ authToken }}"
+          json:
+            boardId: "{{ boardId }}"
+            groupId: 0
+            name: "perf-item-{{ $uuid }}"
+          capture:
+            - json: "$.data.item.id"
+              as: "newItemId"
+          expect:
+            - statusCode: [200, 201]
+      - put:
+          url: "/api/v1/items/{{ newItemId }}/values"
+          headers:
+            authorization: "Bearer {{ authToken }}"
+          json:
+            values:
+              - columnId: 1
+                value: "perf-updated"
+          expect:
+            - statusCode: [200, 201]
+
+  # -----------------------------------------------------------------------
+  # 10% DELETE — create then delete. We deliberately do NOT delete a random
+  # seeded item: that would pollute the deterministic 1.5M-row dataset and
+  # break idempotency of `seed-perf`. Creating a throwaway item keeps the
+  # seed invariant.
+  # -----------------------------------------------------------------------
+  - name: "delete-created-item"
+    weight: 10
+    beforeScenario: "setAuthToken"
+    flow:
+      - post:
+          url: "/api/v1/items"
+          headers:
+            authorization: "Bearer {{ authToken }}"
+          json:
+            boardId: "{{ boardId }}"
+            groupId: 0
+            name: "perf-delete-{{ $uuid }}"
+          capture:
+            - json: "$.data.item.id"
+              as: "deleteItemId"
+          expect:
+            - statusCode: [200, 201]
+      - delete:
+          url: "/api/v1/workspaces/{{ workspaceId }}/boards/{{ boardId }}/items/{{ deleteItemId }}"
+          headers:
+            authorization: "Bearer {{ authToken }}"
+          expect:
+            - statusCode: 200
