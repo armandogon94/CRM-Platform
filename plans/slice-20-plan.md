@@ -301,6 +301,22 @@ Phase E — Verification (sequential)
 
 Tasks C1–C3 can execute in parallel as isolated worktrees on Opus. Each touches only its own `frontends/<industry>/src/App.tsx` + (for MedVista/JurisPath) adoption of `BoardListPage`. Zero cross-industry file conflict.
 
+### ⚠️ DISCOVERED during C1 attempt: `@crm/shared` never integrated
+
+Pre-C1 reading revealed that **none of the 10 industry frontends consume the `@crm/shared` library.** Each has its own forked copies of KanbanView, TableView, BoardListPage, api.ts, StatusBadge, etc. (likely from Slice 17 seed work before Slice 16's shared-lib extraction was adopted). NovaPay's `package.json` does not depend on `@crm/shared`; there's no path alias in its `tsconfig.json` or `vite.config.ts`.
+
+**Consequence:** Phase A/B deliverables (Toast, useBoard mutations, useCanEdit, KanbanCard kebab, BoardListPage toast wiring) are NOT reachable from any industry shell today. Phase C can't simply "mount ToastProvider + thread callbacks" — there's no `@crm/shared` import path for the industry code to call into.
+
+**Two integration options:**
+
+1. **Link option (preferred):** Add `"@crm/shared": "file:../_shared"` to each industry's `package.json`, add a matching `tsconfig.json` path alias + `vite.config.ts` resolve alias per industry. Scope: one prerequisite task (C0) that runs before C1–C3; ~20 lines per industry × 10 industries (but Phase C targets only 3 for Slice 20 scope); enables the shared components to be imported as `@crm/shared/components/...`. Does NOT delete local components — they become dead code for a future refactor-cleaner slice.
+
+2. **Fork option (fast but unprincipled):** Copy the Phase A/B deliverables (Toast, ConfirmDialog, useCanEdit, useBoard mutations) into each industry's local `src/` tree. Scope: ~8 files × 3 industries = 24 file duplications. Permanently drifts industries from the "single source of truth" the shared lib was built for.
+
+**Decision needed from user.** C1 through C3 are blocked until this is resolved. Recommend option 1 — add Task **C0: Wire `@crm/shared` as a file dependency in NovaPay/MedVista/JurisPath** (size S per industry, can parallelize; must land before C1–C3). Task C0 files: `frontends/<industry>/package.json`, `frontends/<industry>/tsconfig.json`, `frontends/<industry>/vite.config.ts`.
+
+Slice 20B would extend C0's integration to the remaining 7 industries.
+
 ### Task C1: NovaPay CRUD wiring
 
 **Description:** Mount `<ToastProvider>` at the app root. Thread `createItem`, `updateItemValue`, `deleteItem` from `useBoard` through to the BoardView component. Gate CRUD affordances behind `useCanEdit()`. NovaPay is router-based so integration is on `BoardPage` + `BoardListPage` routes.
