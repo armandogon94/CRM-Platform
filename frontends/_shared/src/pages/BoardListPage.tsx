@@ -4,7 +4,9 @@ import { useWorkspace } from '../context/WorkspaceContext';
 import { MainLayout } from '../components/layout/MainLayout';
 import { Plus, LayoutGrid, Table, Users, X } from 'lucide-react';
 import api from '../utils/api';
-import type { Board } from '../types/index';
+import { useToast } from '../components/common/ToastProvider';
+// `import type { Board }` was removed alongside the `api.post<{ board: Board }>`
+// generic — api.boards.create now carries the typing internally.
 import type { ThemeConfig } from '../theme';
 
 interface BoardListPageProps {
@@ -14,6 +16,7 @@ interface BoardListPageProps {
 export default function BoardListPage({ theme }: BoardListPageProps) {
   const { boards, refreshBoards, isLoading, workspace } = useWorkspace();
   const navigate = useNavigate();
+  const { show: showToast } = useToast();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [newBoardName, setNewBoardName] = useState('');
   const [newBoardDescription, setNewBoardDescription] = useState('');
@@ -27,7 +30,13 @@ export default function BoardListPage({ theme }: BoardListPageProps) {
 
     setCreating(true);
     try {
-      const res = await api.post<{ board: Board }>('/boards', {
+      // Use the typed api.boards.create (Slice 20 A2) so the response
+      // envelope is checked at compile-time against our ApiResponse<T>
+      // shape. On success the dialog closes + the board list refreshes;
+      // on failure (success: false) the dialog stays open with typed
+      // values preserved so the user can correct + retry without
+      // re-entering everything. (Slice 20 B2 replaced the silent catch.)
+      const res = await api.boards.create({
         name: newBoardName.trim(),
         description: newBoardDescription.trim() || null,
         workspaceId: workspace.id,
@@ -39,9 +48,21 @@ export default function BoardListPage({ theme }: BoardListPageProps) {
         setNewBoardDescription('');
         setShowCreateDialog(false);
         await refreshBoards();
+      } else {
+        showToast({
+          variant: 'error',
+          title: 'Could not create board',
+          description: res.error ?? 'Please try again.',
+        });
       }
-    } catch {
-      // Handle error silently
+    } catch (err) {
+      // Network rejection or other unhandled error. Surface a generic
+      // message — the raw Error text is rarely user-meaningful.
+      showToast({
+        variant: 'error',
+        title: 'Could not create board',
+        description: err instanceof Error ? err.message : 'Network error.',
+      });
     } finally {
       setCreating(false);
     }
