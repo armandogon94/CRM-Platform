@@ -1,0 +1,81 @@
+# Scenario (c) — Automation burst (Slice 19C E3)
+#
+# SPEC.md §Slice 19C line 1287–1290:
+#   Single burst: 100 POST /items calls fired in 5 s, each targeting a board
+#   with 4 active automation rules. Pass condition: all 400 expected
+#   AutomationLog rows present within 30 s.
+#
+# Artillery's `arrivalCount: N, duration: S` phase is the explicit burst
+# primitive — Artillery spreads N virtual users evenly across S seconds, so
+# this matches the spec verbatim (100 VUs / 5 s). Each VU fires exactly one
+# POST /items before exiting, producing the 100-item write wave.
+#
+# Artillery itself has no way to query Postgres post-run, so AutomationLog
+# row-count verification lives in F1's orchestrator (run.ts). This YAML's
+# sole responsibility is *producing* the 100 items that should fan out into
+# 400 AutomationLog rows downstream.
+#
+# Short-run mode (PERF_SHORT_RUN=1) collapses the burst to 10 VUs / 5 s so
+# CI and the E3 validation test can run without DB or backend dependencies.
+# The orchestrator full-run omits the env var and gets the spec's 100 VUs.
+#
+# Fixture variables consumed via Artillery `{{ }}` templating — injected by
+# F1 before invoking `artillery run`:
+#   PERF_BOARD_ID_AUTOMATIONS  UUID of the seeded board with 4 active rules
+#   PERF_GROUP_ID_AUTOMATIONS  Group within that board that items belong to
+#   PERF_STATUS_COL_ID         Status column id on that board
+#   PERF_STATUS_TRIGGER_VALUE  Status label that triggers the most rules
+#                              simultaneously (seeded by B2; defaults to
+#                              'Disputed' which fires the fraud escalation
+#                              rule seeded in backend/src/seeds/novapay/
+#                              automations.ts).
+
+config:
+  target: "{{ $processEnvironment.BACKEND_URL }}"
+  http:
+    timeout: 30
+    pool: 50
+  processor: "./dist/fixtures.js"
+  # Single-phase burst. Artillery's arrivalCount semantics spread N arrivals
+  # across `duration` seconds — exactly the 100-in-5s shape the SPEC calls
+  # for. Short-run mode shrinks the arrival count; the 5s window is kept
+  # identical so the burst shape (arrivals/sec) still looks burst-like.
+  phases:
+    - name: "burst"
+      arrivalCount: "{{ $processEnvironment.PERF_BURST_ARRIVAL_COUNT }}"
+      duration: 5
+  variables:
+    boardId:
+      - "{{ $processEnvironment.PERF_BOARD_ID_AUTOMATIONS }}"
+    groupId:
+      - "{{ $processEnvironment.PERF_GROUP_ID_AUTOMATIONS }}"
+    statusColId:
+      - "{{ $processEnvironment.PERF_STATUS_COL_ID }}"
+    # Setting Status=Disputed triggers NovaPay's "Fraud Alert — Auto-Escalate
+    # Disputed Transactions" rule (see backend/src/seeds/novapay/automations.ts).
+    # B2 seeds a dedicated perf board that amplifies this by stacking 4 rules
+    # keyed to the same status transition, so a single POST fans out 4×.
+    statusTriggerValue:
+      - "{{ $processEnvironment.PERF_STATUS_TRIGGER_VALUE }}"
+
+scenarios:
+  - name: "automation-burst-post-item"
+    beforeScenario: "setAuthToken"
+    flow:
+      - post:
+          url: "/api/v1/items"
+          headers:
+            authorization: "Bearer {{ authToken }}"
+            content-type: "application/json"
+          json:
+            boardId: "{{ boardId }}"
+            groupId: "{{ groupId }}"
+            name: "perf-burst-{{ $uuid }}"
+            values:
+              # Single column set to the trigger-firing status. Items land on
+              # the board with this status already applied, so AutomationEngine
+              # sees it on create and fans out to the 4 rules keyed on this
+              # transition.
+              "{{ statusColId }}": "{{ statusTriggerValue }}"
+          expect:
+            - statusCode: [200, 201]
