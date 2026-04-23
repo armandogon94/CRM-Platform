@@ -31,10 +31,17 @@ const dbConfig: Options = {
   },
 };
 
-const defaultDatabaseName = perfEnvironment ? perfDatabaseName : 'crm_platform';
+// In perf mode we FORCE `crm_perf` regardless of DB_NAME env — dotenv.config()
+// above re-loads backend/.env which sets DB_NAME=crm_platform for dev, and
+// respecting that here would silently target the wrong DB under NODE_ENV=perf.
+// The A3 safety guard (server.ts) also rejects non-crm_perf DB names, so this
+// is belt-and-suspenders enforcement at both the connection and startup layer.
+const resolvedDatabaseName = perfEnvironment
+  ? perfDatabaseName
+  : process.env.DB_NAME || 'crm_platform';
 
 const sequelize = new Sequelize(
-  process.env.DB_NAME || defaultDatabaseName,
+  resolvedDatabaseName,
   process.env.DB_USER || 'crm_admin',
   process.env.DB_PASSWORD || 'crm_secret_2026',
   dbConfig
