@@ -1,0 +1,41 @@
+# Shared Artillery config fragment for all Slice 19C perf scenarios.
+#
+# Individual scenarios in artillery/scenario-*.yml reference this file via
+# Artillery's `config.extends` (or copy the relevant blocks — Artillery's
+# YAML merge is limited, so some duplication is expected).
+#
+# Run context: from inside the perf compose profile, BACKEND_URL should
+# resolve to http://backend:13000. From the host, use http://localhost:13000.
+# The orchestrator must `npm run build` before scenario execution so that
+# dist/lib/fixtures.js exists for the `processor:` entry below.
+
+config:
+  # Target base URL. Falls back to http://backend:13000 if BACKEND_URL isn't
+  # set (matches the perf docker-compose service name).
+  target: "{{ $processEnvironment.BACKEND_URL }}"
+
+  http:
+    # 30 s per-request timeout — generous enough to accommodate the 5 MB
+    # upload scenario without false failures.
+    timeout: 30
+    # Keep-alive connection pool size per worker. 50 VUs per worker is the
+    # baseline for Scenario (a).
+    pool: 50
+
+  # Path is relative to the directory Artillery is invoked from. The
+  # orchestrator always runs `artillery run` from e2e/perf/, so dist/ resolves
+  # to e2e/perf/dist/.
+  #
+  # Note: because tsc's rootDir collapses to e2e/perf/lib/ (the common prefix
+  # of all input .ts files), compiled output lives directly under dist/ (not
+  # dist/lib/). If future tasks add TS sources outside lib/, this path will
+  # shift to ./dist/lib/fixtures.js — update both here and the scenario files.
+  processor: "./dist/fixtures.js"
+
+  engines:
+    # Socket.io v3 engine — wire-compatible with Socket.io v4 server
+    # (per SPEC §19C ADR). Empty object == use defaults.
+    socketio-v3: {}
+
+  # Default phases are left to each scenario file; common.yml only carries
+  # the cross-scenario plumbing (target, HTTP pool, processor, engines).
