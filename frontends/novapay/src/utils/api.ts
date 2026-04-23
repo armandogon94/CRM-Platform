@@ -1,4 +1,12 @@
-import type { ApiResponse } from '../types';
+import type {
+  ApiResponse,
+  User,
+  Workspace,
+  Board,
+  Item,
+  ColumnValue,
+  Automation,
+} from '../types';
 
 const API_BASE = '/api/v1';
 
@@ -42,47 +50,47 @@ async function request<T>(
 export const api = {
   // Auth
   login: (email: string, password: string) =>
-    request<{ user: unknown; accessToken: string; refreshToken: string }>('/auth/login', {
+    request<{ user: User; accessToken: string; refreshToken: string }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     }),
 
-  getProfile: () => request<{ user: unknown }>('/auth/me'),
+  getProfile: () => request<{ user: User }>('/auth/me'),
 
   // Workspaces
-  getWorkspace: (id: number) => request<{ workspace: unknown }>(`/workspaces/${id}`),
+  getWorkspace: (id: number) => request<{ workspace: Workspace }>(`/workspaces/${id}`),
 
   // Boards
   getBoards: (workspaceId: number) =>
-    request<{ boards: unknown[] }>(`/boards?workspaceId=${workspaceId}`),
+    request<{ boards: Board[] }>(`/boards?workspaceId=${workspaceId}`),
 
-  getBoard: (id: number) => request<{ board: unknown }>(`/boards/${id}`),
+  getBoard: (id: number) => request<{ board: Board }>(`/boards/${id}`),
 
   getBoardItems: (boardId: number) =>
-    request<{ items: unknown[] }>(`/boards/${boardId}/items`),
+    request<{ items: Item[] }>(`/boards/${boardId}/items`),
 
   // Items
   createItem: (data: { boardId: number; groupId: number; name: string; values?: Record<number, unknown> }) =>
-    request<{ item: unknown }>('/items', {
+    request<{ item: Item }>('/items', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
   updateItem: (id: number, data: Record<string, unknown>) =>
-    request<{ item: unknown }>(`/items/${id}`, {
+    request<{ item: Item }>(`/items/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
 
   updateColumnValues: (itemId: number, values: { columnId: number; value: unknown }[]) =>
-    request<{ values: unknown[] }>(`/items/${itemId}/values`, {
+    request<{ values: ColumnValue[] }>(`/items/${itemId}/values`, {
       method: 'PUT',
       body: JSON.stringify({ values }),
     }),
 
   // Automations
   getAutomations: (boardId: number) =>
-    request<{ automations: unknown[] }>(`/automations?boardId=${boardId}`),
+    request<{ automations: Automation[] }>(`/automations?boardId=${boardId}`),
 
   triggerAutomation: (id: number) =>
     request<{ log: unknown }>(`/automations/${id}/trigger`, { method: 'POST' }),

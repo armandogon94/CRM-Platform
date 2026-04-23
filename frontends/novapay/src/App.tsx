@@ -50,7 +50,7 @@ function AppContent() {
     if (!user?.workspaceId) return;
     api.getBoards(user.workspaceId).then((res) => {
       if (res.success && res.data) {
-        setBoards(res.data.boards || res.data as Board[] || []);
+        setBoards(res.data.boards || []);
       }
     });
   }, [user?.workspaceId]);
@@ -63,7 +63,7 @@ function AppContent() {
       for (const board of boards) {
         const res = await api.getBoardItems(board.id);
         if (res.success && res.data) {
-          itemMap[board.id] = res.data.items || res.data as Item[] || [];
+          itemMap[board.id] = res.data.items || [];
         }
       }
       setAllItems(itemMap);
@@ -79,10 +79,10 @@ function AppContent() {
       api.getBoardItems(boardId),
     ]);
     if (boardRes.success && boardRes.data) {
-      setCurrentBoard(boardRes.data.board as Board);
+      setCurrentBoard(boardRes.data.board);
     }
     if (itemsRes.success && itemsRes.data) {
-      setCurrentItems(itemsRes.data.items || itemsRes.data as Item[] || []);
+      setCurrentItems(itemsRes.data.items || []);
     }
     setBoardLoading(false);
   }, []);
@@ -93,7 +93,7 @@ function AppContent() {
     for (const board of boards) {
       const res = await api.getAutomations(board.id);
       if (res.success && res.data) {
-        const autos = res.data.automations || res.data as Automation[] || [];
+        const autos = res.data.automations || [];
         allAutos.push(...autos);
       }
     }

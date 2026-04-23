@@ -1,4 +1,4 @@
-import { CreditCard, Building2, ShieldCheck, TrendingUp, DollarSign, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
+import { CreditCard, Building2, ShieldCheck, TrendingUp, DollarSign, AlertTriangle, CheckCircle } from 'lucide-react';
 import type { Board, Item, ColumnValue } from '../types';
 
 interface OverviewDashboardProps {
