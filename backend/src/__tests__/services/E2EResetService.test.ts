@@ -148,7 +148,12 @@ describe('E2EResetService.reset', () => {
       expect.objectContaining({ where: { workspaceId: 42 }, force: true })
     );
 
-    expect(reseed).toHaveBeenCalledWith(42, mockTransaction);
+    // Slice 19.6 fix: reseed now runs AFTER the transaction commits
+    // (so the callback's findOrCreate reads wiped committed state).
+    // The second arg is kept for backwards-compat with the original
+    // signature but is passed as `undefined` since the tx is gone.
+    expect(reseed).toHaveBeenCalledTimes(1);
+    expect((reseed as jest.Mock).mock.calls[0][0]).toBe(42);
     expect(mockCommit).toHaveBeenCalledTimes(1);
     expect(mockRollback).not.toHaveBeenCalled();
   });
@@ -214,6 +219,8 @@ describe('E2EResetService.reset', () => {
 
     await service.reset({ reseed });
 
-    expect(order).toEqual(['Board.destroy', 'reseed', 'commit']);
+    // Slice 19.6 fix: Board.destroy fires inside the tx, then commit
+    // runs, THEN reseed (so findOrCreate sees the wiped DB state).
+    expect(order).toEqual(['Board.destroy', 'commit', 'reseed']);
   });
 });

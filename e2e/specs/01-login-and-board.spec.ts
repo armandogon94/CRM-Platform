@@ -42,11 +42,11 @@ test.describe('Flow 1 — login and open board', () => {
 
     // The seeded board renders as an interactive card (a <button>
     // styled as a card — see BoardListPage.tsx). Scope to the main
-    // grid so the name match is unambiguous even if the word appears
-    // elsewhere (sidebar, dialogs, etc.).
-    const pipelineCard = page.getByRole('button', {
-      name: /Transaction Pipeline/,
-    });
+    // grid via the `main` landmark so the name match is unambiguous
+    // even if the board name also appears in the sidebar navigation.
+    const pipelineCard = page
+      .getByRole('main')
+      .getByRole('button', { name: /Transaction Pipeline/ });
     await expect(pipelineCard).toBeVisible();
 
     // Opening the board routes to /boards/<numeric-id>.

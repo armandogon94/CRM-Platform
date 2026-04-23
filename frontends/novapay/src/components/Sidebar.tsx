@@ -1,9 +1,10 @@
 import { LayoutDashboard, CreditCard, Building2, ShieldCheck, Zap, Settings, LogOut } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 interface SidebarProps {
+  /** URL-derived active key. See App.tsx for the mapping rules. */
   activeBoard: string | null;
-  onBoardSelect: (boardKey: string) => void;
   boards: { id: number; name: string }[];
 }
 
@@ -13,8 +14,11 @@ const boardIcons: Record<string, typeof CreditCard> = {
   'Compliance & Regulatory': ShieldCheck,
 };
 
-export function Sidebar({ activeBoard, onBoardSelect, boards }: SidebarProps) {
+export function Sidebar({ activeBoard, boards }: SidebarProps) {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
+  const goTo = (path: string) => () => navigate(path);
 
   return (
     <aside className="w-64 bg-brand-800 text-white flex flex-col h-screen fixed left-0 top-0">
@@ -37,7 +41,7 @@ export function Sidebar({ activeBoard, onBoardSelect, boards }: SidebarProps) {
           Dashboard
         </div>
         <button
-          onClick={() => onBoardSelect('overview')}
+          onClick={goTo('/overview')}
           className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
             activeBoard === 'overview'
               ? 'bg-brand-600 text-white'
@@ -46,6 +50,17 @@ export function Sidebar({ activeBoard, onBoardSelect, boards }: SidebarProps) {
         >
           <LayoutDashboard size={18} />
           Overview
+        </button>
+        <button
+          onClick={goTo('/boards')}
+          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+            activeBoard === 'boards'
+              ? 'bg-brand-600 text-white'
+              : 'text-brand-200 hover:bg-brand-700'
+          }`}
+        >
+          <LayoutDashboard size={18} />
+          All Boards
         </button>
 
         <div className="px-3 pt-4 pb-2 text-xs font-semibold text-brand-300 uppercase tracking-wider">
@@ -56,7 +71,7 @@ export function Sidebar({ activeBoard, onBoardSelect, boards }: SidebarProps) {
           return (
             <button
               key={board.id}
-              onClick={() => onBoardSelect(String(board.id))}
+              onClick={goTo(`/boards/${board.id}`)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
                 activeBoard === String(board.id)
                   ? 'bg-brand-600 text-white'
@@ -73,7 +88,7 @@ export function Sidebar({ activeBoard, onBoardSelect, boards }: SidebarProps) {
           System
         </div>
         <button
-          onClick={() => onBoardSelect('automations')}
+          onClick={goTo('/automations')}
           className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
             activeBoard === 'automations'
               ? 'bg-brand-600 text-white'
@@ -105,6 +120,7 @@ export function Sidebar({ activeBoard, onBoardSelect, boards }: SidebarProps) {
           </div>
           <button
             onClick={logout}
+            aria-label="Sign out"
             className="text-brand-300 hover:text-white transition-colors"
             title="Sign out"
           >

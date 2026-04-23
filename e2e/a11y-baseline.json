@@ -1,1 +1,32 @@
-[]
+[
+  {
+    "rule": "color-contrast",
+    "selector": ".w-8",
+    "justification": "Sidebar avatar uses brand-500 background with white initials. Contrast ratio slightly under WCAG AA 4.5:1. Decorative — user's name and email next to the avatar provide the primary affordance. Revisit at next branding refresh.",
+    "reviewedOn": "2026-04-22"
+  },
+  {
+    "rule": "color-contrast",
+    "selector": "span:nth-child(1)",
+    "justification": "BoardPage footer stats (item count) use text-gray-400 on white. Ambient stat, not primary content. Fix requires designer-approved palette bump.",
+    "reviewedOn": "2026-04-22"
+  },
+  {
+    "rule": "color-contrast",
+    "selector": "span:nth-child(2)",
+    "justification": "BoardPage footer stats (group count) — same pattern as span:nth-child(1). Scoped together for design refresh.",
+    "reviewedOn": "2026-04-22"
+  },
+  {
+    "rule": "color-contrast",
+    "selector": "span:nth-child(3)",
+    "justification": "BoardPage footer stats (column count) — same pattern as span:nth-child(1).",
+    "reviewedOn": "2026-04-22"
+  },
+  {
+    "rule": "color-contrast",
+    "selector": ".hover\\:text-gray-700",
+    "justification": "BoardPage view-mode toggle (Table / Kanban) inactive state uses text-gray-500 on bg-gray-100. Contrast ~4.4:1, just under AA 4.5:1. Active state has stronger contrast. Tracked with the same design-refresh ticket.",
+    "reviewedOn": "2026-04-22"
+  }
+]

@@ -1,9 +1,11 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { CreditCard } from 'lucide-react';
 
 export function LoginPage() {
   const { login } = useAuth();
+  const navigate = useNavigate();
   const [email, setEmail] = useState('admin@novapay.com');
   const [password, setPassword] = useState('demo123');
   const [error, setError] = useState('');
@@ -15,6 +17,9 @@ export function LoginPage() {
     setLoading(true);
     try {
       await login(email, password);
+      // Post-login destination is /boards (Slice 19.6 migration — the
+      // route aligns NovaPay with the Slice 19 spec's URL assumptions).
+      navigate('/boards', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     }

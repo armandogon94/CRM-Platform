@@ -1,18 +1,51 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { Table, LayoutGrid, Search, Filter, Plus } from 'lucide-react';
 import { BoardTable } from './BoardTable';
 import { KanbanView } from './KanbanView';
+import { api } from '../utils/api';
 import type { Board, Item } from '../types';
 
-interface BoardPageProps {
-  board: Board | null;
-  items: Item[];
-  loading: boolean;
-}
+/**
+ * NovaPay router-based board page (Slice 19.6 migration).
+ *
+ * Reads `:id` from `/boards/:id` via `useParams`, fetches the board +
+ * items independently. Previously the parent App.tsx drove fetches
+ * via `activeView` state; now this component owns its own lifecycle
+ * keyed on URL id changes.
+ *
+ * DOM contract required by Slice 19 D1 spec:
+ *   - h1 with the board's name (e.g. "Transaction Pipeline")
+ *   - `<button>New Item</button>` in the toolbar
+ */
+export function BoardPage() {
+  const { id } = useParams<{ id: string }>();
+  const boardId = id ? parseInt(id, 10) : NaN;
 
-export function BoardPage({ board, items, loading }: BoardPageProps) {
+  const [board, setBoard] = useState<Board | null>(null);
+  const [items, setItems] = useState<Item[]>([]);
+  const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table');
   const [searchQuery, setSearchQuery] = useState('');
+
+  useEffect(() => {
+    if (isNaN(boardId)) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    Promise.all([api.getBoard(boardId), api.getBoardItems(boardId)]).then(
+      ([boardRes, itemsRes]) => {
+        if (boardRes.success && boardRes.data) {
+          setBoard(boardRes.data.board);
+        }
+        if (itemsRes.success && itemsRes.data) {
+          setItems(itemsRes.data.items || []);
+        }
+        setLoading(false);
+      }
+    );
+  }, [boardId]);
 
   if (loading) {
     return (
@@ -37,11 +70,12 @@ export function BoardPage({ board, items, loading }: BoardPageProps) {
     : items;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 p-6">
       {/* Board Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">{board.name}</h2>
+          {/* Slice 19 D1 asserts `getByRole('heading', { level: 1, name: <board> })` */}
+          <h1 className="text-xl font-bold text-gray-900">{board.name}</h1>
           {board.description && (
             <p className="text-sm text-gray-500 mt-0.5">{board.description}</p>
           )}

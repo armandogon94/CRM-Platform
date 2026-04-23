@@ -66,7 +66,12 @@ export class E2EResetService {
   async reset(options: E2EResetOptions = {}): Promise<E2EResetResult | null> {
     const reseed = options.reseed ?? this.defaultReseed;
 
-    return sequelize.transaction(async (tx) => {
+    // Phase 1: wipe inside a transaction. Phase 2 (reseed) runs AFTER
+    // the wipe commits — callbacks use `findOrCreate` which reads
+    // committed state, so running reseed inside the same transaction
+    // caused findOrCreate to see un-wiped rows and skip creation,
+    // leaving the fixture empty (Slice 19.6 live-run bug).
+    const workspaceId = await sequelize.transaction(async (tx) => {
       // paranoid: false so a previously soft-deleted fixture is still
       // matched. Without this the reset would silently become a no-op
       // if someone ever (accidentally or via an admin action) soft-
@@ -139,11 +144,15 @@ export class E2EResetService {
       await ActivityLog.destroy({ where: { workspaceId }, transaction: tx, force: true });
       await FileAttachment.destroy({ where: { workspaceId }, transaction: tx, force: true });
 
-      // ─── Re-seed ──────────────────────────────────────────────────
-      await reseed(workspaceId, tx);
-
-      return { workspaceId };
+      // Return just the id; the caller runs reseed AFTER commit.
+      return fixture.id;
     });
+
+    // Phase 2: reseed after commit so the callback's findOrCreate calls
+    // see the wiped state.
+    if (workspaceId === null) return null;
+    await reseed(workspaceId, undefined as unknown as Transaction);
+    return { workspaceId };
   }
 }
 
