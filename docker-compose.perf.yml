@@ -1,0 +1,173 @@
+# docker-compose.perf.yml
+#
+# Perf overlay for Slice 19C. Merge with the base compose and activate
+# the `perf` profile explicitly:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.perf.yml \
+#     --profile perf up backend
+#
+# Scope (backend-only load surface):
+#   1. Container resource limits: backend 1 CPU / 1 GB, postgres 2 CPU /
+#      2 GB, redis 0.5 CPU / 256 MB — matches SPEC §Slice 19C / Test
+#      environment. Rationale: we want production-like headroom so
+#      results are comparable run-to-run. Budgets intentionally
+#      asymmetric — Postgres does most of the work in scenarios (a)/(c),
+#      Redis just caches reads, backend is the unit under test and is
+#      pinned at the smallest CPU/RAM slice so saturation shows up
+#      quickly.
+#   2. Compiled-mode backend runtime (`node dist/server.js`) instead of
+#      the dev stage's ts-node-dev watcher. The base compose builds the
+#      `dev` target which does NOT run `npm run build`; the override
+#      command below runs a build step as a fallback before launching
+#      the compiled server so developers don't need to rebuild the
+#      image for the prod stage. If `dist/` is already present (image
+#      built against the `prod` target in backend/Dockerfile, which
+#      already supplies a `node dist/server.js` CMD), the build step is
+#      a no-op cache hit.
+#   3. Redis logical DB 1 (`redis://redis:6379/1`) so perf traffic never
+#      touches the dev cache in DB 0. Matches Slice 19C A1's perf config
+#      branch.
+#   4. `DB_NAME=crm_perf` — redundant with the A2 config branch (which
+#      forces `crm_perf` in perf mode regardless of env) but explicit
+#      here as defence-in-depth and documentation for anyone reading
+#      the overlay in isolation.
+#   5. No frontend services — perf exercises backend + DB + Redis only.
+#
+# Profile scoping:
+#   - The three unit-under-test services (postgres, redis, backend) are
+#     gated on `profiles: [perf]` so the overlay's resource limits and
+#     perf env vars stay dormant unless `--profile perf` is explicitly
+#     passed. A plain `docker compose up` (without this overlay or
+#     without the profile flag) runs unchanged.
+#   - All 10 industry frontends are re-declared with a non-perf profile
+#     (`profiles: [_no_perf]`) so that when `--profile perf` IS active
+#     they are excluded from the `--services` list — perf only exercises
+#     the backend. Any non-matching profile name works; `_no_perf` is a
+#     documentation marker, not a profile the user ever activates.
+#   - Consequence: running `docker compose -f docker-compose.yml -f
+#     docker-compose.perf.yml config` with NO profile flag leaves every
+#     service behind a profile gate and emits a dependency error
+#     (frontends depend on backend, which is gated). This is the
+#     intended safety signal — the overlay is meant to be paired with
+#     `--profile perf`. For unmodified dev behavior, omit this overlay
+#     entirely.
+#
+# `deploy.resources.limits` caveat:
+#   Under Docker Swarm (`docker stack deploy`) the `deploy` key is the
+#   canonical way to enforce resource limits. For `docker compose`
+#   (v2.x, Compose Spec), limits under `deploy.resources.limits` are
+#   respected for local single-host runs starting with Compose v1.27 /
+#   v2.0. On very old `docker-compose` v1.x binaries the `deploy` block
+#   is silently ignored. If you are on the ancient binary, upgrade to
+#   Docker Desktop 4.x or compose-v2 (`docker compose` instead of
+#   `docker-compose`). We standardise on compose-v2 for this project.
+
+services:
+  postgres:
+    profiles:
+      - perf
+    # Note: no data override — perf mode reuses the same Postgres
+    # container as dev. The `crm_perf` database is created by the perf
+    # bootstrap (Slice 19C A2 adds a `CREATE DATABASE crm_perf` step
+    # and migrations run against it independently of dev's `crm_platform`).
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+
+  redis:
+    profiles:
+      - perf
+    # Redis stays shared with dev at the container level; logical DB
+    # isolation (db 0 = dev, db 1 = perf) keeps the two namespaces
+    # separate. The backend env override below points to db 1.
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  backend:
+    profiles:
+      - perf
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    environment:
+      NODE_ENV: perf
+      # The base compose bind-mounts ./backend:/app and backend/.env has
+      # DB_HOST=localhost (for host-machine dev). The containerised perf
+      # backend must reach postgres by service name. Same pattern as the
+      # e2e overlay.
+      DB_HOST: postgres
+      # A2's config branch forces `crm_perf` when NODE_ENV=perf, but we
+      # set it explicitly here so the overlay is self-documenting and
+      # survives any future refactor of the config branch.
+      DB_NAME: crm_perf
+      # Logical DB 1 — A1's perf config branch routes Redis connections
+      # to db 1; making it explicit in the overlay guarantees the URL
+      # is correct even if env precedence changes.
+      REDIS_URL: redis://redis:6379/1
+    # Compiled-mode runtime. `npm run build` produces dist/ inside the
+    # container; `node dist/server.js` then runs the compiled bundle —
+    # ts-node startup cost and runtime overhead are excluded from perf
+    # measurements. Migrations still run via sequelize-cli against
+    # crm_perf before the server starts. If building against the
+    # `prod` Dockerfile stage (which bakes `dist/` and sets CMD
+    # node dist/server.js), the `npm run build` step is a redundant
+    # no-op but keeps the command portable for the default `dev`
+    # target that the base compose currently builds.
+    command: sh -c "npm run build && npx sequelize-cli db:migrate && node dist/server.js"
+
+  # ─── Frontends: excluded from perf runs ─────────────────────────────
+  #
+  # Re-declared here with `profiles: [_no_perf]` so the merged service
+  # definitions are gated on a profile that `--profile perf` does NOT
+  # activate. End result: `docker compose ... --profile perf config
+  # --services` lists only postgres, redis, backend (the 10 frontends
+  # are filtered out). No other property is changed — if a caller
+  # explicitly passes `--profile _no_perf`, the frontends would come
+  # back with their base configuration.
+
+  novapay-frontend:
+    profiles:
+      - _no_perf
+
+  medvista-frontend:
+    profiles:
+      - _no_perf
+
+  trustguard-frontend:
+    profiles:
+      - _no_perf
+
+  urbannest-frontend:
+    profiles:
+      - _no_perf
+
+  swiftroute-frontend:
+    profiles:
+      - _no_perf
+
+  dentaflow-frontend:
+    profiles:
+      - _no_perf
+
+  jurispath-frontend:
+    profiles:
+      - _no_perf
+
+  tablesync-frontend:
+    profiles:
+      - _no_perf
+
+  cranestack-frontend:
+    profiles:
+      - _no_perf
+
+  edupulse-frontend:
+    profiles:
+      - _no_perf
