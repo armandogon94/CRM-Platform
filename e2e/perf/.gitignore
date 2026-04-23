@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# TypeScript build output (not committed)
+dist/
+
+# Per-run artifacts (JSON + markdown reports)
+results/
+# Exception: baseline.md IS tracked (committed by Task F2)
+!results/baseline.md
+
+# Logs
+*.log

@@ -1,0 +1,20 @@
+{
+  "name": "crm-perf",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Artillery-based load and performance testing for the CRM Platform",
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "artillery": "^2.0.21",
+    "typescript": "^5.6.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "UNLICENSED"
+}
