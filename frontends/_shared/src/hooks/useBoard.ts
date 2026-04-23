@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Board, Item, BoardGroup, Column, ColumnValue } from '../types/index';
 import { useWebSocket } from './useWebSocket';
 import api from '../utils/api';
+import { useToast } from '../components/common/ToastProvider';
 
 interface FilterItem {
   columnId: number;
@@ -17,6 +18,12 @@ interface RefreshItemsOptions {
   sortOrder?: 'ASC' | 'DESC';
 }
 
+interface CreateItemMutationInput {
+  groupId: number;
+  name: string;
+  values?: Record<number, unknown>;
+}
+
 interface UseBoardReturn {
   board: Board | null;
   items: Item[];
@@ -28,6 +35,11 @@ interface UseBoardReturn {
   totalItems: number;
   currentPage: number;
   totalPages: number;
+  // Mutations (Slice 20 A3) — callers get stable references + toast-on-error
+  // so the industry App shells can thread these through without boilerplate.
+  createItem: (input: CreateItemMutationInput) => Promise<void>;
+  updateItemValue: (itemId: number, columnId: number, value: unknown) => Promise<void>;
+  deleteItem: (itemId: number) => Promise<void>;
 }
 
 // Pure state-update helpers (exported for testability)
@@ -105,6 +117,21 @@ export function useBoard(boardId: number): UseBoardReturn {
   const [totalItems, setTotalItems] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+
+  // useToast throws if the consumer isn't wrapped in <ToastProvider>.
+  // That's an intentional constraint for Slice 20+ — Phase C industry
+  // wiring mounts <ToastProvider> at the app root so every useBoard
+  // call-site gets the same error-surface.
+  const { show: showToast } = useToast();
+
+  // Mirror the items list into a ref so mutation callbacks can read the
+  // latest snapshot without being recreated on every render. Reading
+  // inside a setItems updater is unsafe under React 18 StrictMode — the
+  // updater may run twice and the second pass sees post-update state.
+  const itemsRef = useRef<Item[]>([]);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
 
   const { isConnected } = useWebSocket(boardId, {
     onItemCreated: (item: Item) => {
@@ -241,6 +268,118 @@ export function useBoard(boardId: number): UseBoardReturn {
     };
   }, [boardId]);
 
+  // ── Mutations ────────────────────────────────────────────────────────
+  //
+  // Contract decisions (spec §Flow A/C/D, SPEC.md §Slice 20):
+  //   - createItem: server round-trip + WebSocket echo append. We do NOT
+  //     locally insert the item on success — the existing onItemCreated
+  //     socket handler above does that. Double-inserting was a bug in
+  //     earlier drafts; deferring to WS echo is the authoritative path.
+  //   - updateItemValue: optimistic local update, rollback on error.
+  //     Status cells on a 200-row Table view need sub-100ms perceived
+  //     latency; waiting for the server echo felt laggy during spike.
+  //   - deleteItem: optimistic local remove, re-insert on error. The
+  //     WS echo deletion handler is idempotent (filters by id) so the
+  //     local optimistic remove + echo remove is safe to double-apply.
+
+  const createItem = useCallback(
+    async (input: CreateItemMutationInput) => {
+      const res = await api.items.create({
+        boardId,
+        groupId: input.groupId,
+        name: input.name,
+        values: input.values,
+      });
+      if (!res.success) {
+        showToast({
+          variant: 'error',
+          title: 'Could not create item',
+          description: res.error ?? 'Unknown error',
+        });
+      }
+      // Success path intentionally a no-op — WS echo appends the row.
+    },
+    [boardId, showToast]
+  );
+
+  const updateItemValue = useCallback(
+    async (itemId: number, columnId: number, value: unknown) => {
+      // Snapshot the prior value BEFORE the setItems call. Reading from
+      // itemsRef instead of inside the updater avoids StrictMode's
+      // double-invocation hazard described at the ref declaration.
+      const snapshot = itemsRef.current;
+      const priorCv = snapshot
+        .find((i) => i.id === itemId)
+        ?.columnValues?.find((c) => c.columnId === columnId);
+      const priorValue = priorCv?.value;
+
+      setItems((prev) =>
+        prev.map((it) => {
+          if (it.id !== itemId) return it;
+          const cvs = it.columnValues ?? [];
+          const idx = cvs.findIndex((c) => c.columnId === columnId);
+          const nextCvs =
+            idx >= 0
+              ? cvs.map((c) => (c.columnId === columnId ? { ...c, value } : c))
+              : [...cvs, { id: -1, itemId, columnId, value } as unknown as ColumnValue];
+          return { ...it, columnValues: nextCvs };
+        })
+      );
+
+      const res = await api.items.updateValues(itemId, [{ columnId, value }]);
+      if (!res.success) {
+        // Roll back the optimistic update.
+        setItems((prev) =>
+          prev.map((it) => {
+            if (it.id !== itemId) return it;
+            const cvs = it.columnValues ?? [];
+            const nextCvs = cvs.map((c) =>
+              c.columnId === columnId ? { ...c, value: priorValue } : c
+            );
+            return { ...it, columnValues: nextCvs };
+          })
+        );
+        showToast({
+          variant: 'error',
+          title: 'Could not update value',
+          description: res.error ?? 'Unknown error',
+        });
+      }
+    },
+    [showToast]
+  );
+
+  const deleteItem = useCallback(
+    async (itemId: number) => {
+      // Snapshot via ref (StrictMode-safe — see updateItemValue comment).
+      const snapshot = itemsRef.current;
+      const removedIndex = snapshot.findIndex((i) => i.id === itemId);
+      const removed = removedIndex >= 0 ? snapshot[removedIndex] : undefined;
+
+      setItems((prev) => prev.filter((i) => i.id !== itemId));
+
+      const res = await api.items.delete(itemId);
+      if (!res.success) {
+        // Re-insert at the original index so the UI doesn't re-order.
+        if (removed) {
+          const restored = removed;
+          const restoredIndex = removedIndex;
+          setItems((prev) => {
+            const copy = [...prev];
+            copy.splice(Math.max(0, restoredIndex), 0, restored);
+            return copy;
+          });
+        }
+        showToast({
+          variant: 'error',
+          title: 'Could not delete item',
+          description: res.error ?? 'Unknown error',
+        });
+      }
+    },
+    [showToast]
+  );
+
   return {
     board,
     items,
@@ -252,5 +391,8 @@ export function useBoard(boardId: number): UseBoardReturn {
     totalItems,
     currentPage,
     totalPages,
+    createItem,
+    updateItemValue,
+    deleteItem,
   };
 }
