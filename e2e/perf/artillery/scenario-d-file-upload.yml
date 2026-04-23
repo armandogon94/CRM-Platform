@@ -1,0 +1,81 @@
+# Scenario (d) — Concurrent file upload + quota integrity — Slice 19C E4
+#
+# SPEC §19C (line 1292-1296): 50 concurrent POST /items/:id/files uploads,
+# each a 5 MiB deterministic payload. Workspace quota pre-set to 200 MB →
+# 40 uploads succeed, 10 rejected with HTTP 413. Integrity check post-run
+# verifies storage usage matches SUM of successful upload sizes.
+#
+# Shape of this scenario:
+#   - arrivalCount: 50 over 10 s (≈5 req/s arrival, but all 50 VUs run
+#     concurrently because each upload takes longer than the 10 s window).
+#   - Each VU POSTs a 5 MiB multipart/form-data payload to
+#     /api/v1/items/{{ seededItemId }}/files. The seededItemId is read from
+#     the Artillery scenario vars (set by fixtures.ts / orchestrator).
+#   - A processor hook (`attachFilePayload`) lives in fixtures.ts and
+#     populates `requestParams.formData` with the 5 MiB Buffer returned by
+#     `generate5MbPayload()` before the request is dispatched — keeps the
+#     YAML declarative and the heavy lifting in typed code.
+#
+# Short-run mode (used by scenario-d.test.ts and the orchestrator in
+# `--short` mode): 10 uploads against a workspace with 40 MB quota →
+# 8 succeed, 2 reject with 413. Overrides arrivalCount via CLI override
+# rather than forking this file.
+#
+# Quota integrity is NOT asserted from inside Artillery itself. F1's
+# orchestrator runs a post-run SQL query against crm_perf to verify:
+#   SUM(file_size) == successful_upload_count * 5 MiB
+#   rejected_count == ceil(total_uploads - quota / 5 MiB)
+#   no orphan rows (file row exists but not on disk) and vice versa.
+
+config:
+  target: "{{ $processEnvironment.BACKEND_URL }}"
+
+  http:
+    # 60 s timeout: 5 MiB uploads over a saturated pool can take longer than
+    # the 30 s default in common.yml. Scenario (d) gets its own override.
+    timeout: 60
+    # 50 keep-alive slots per worker — matches peak concurrency of this run.
+    pool: 50
+
+  # Processor path follows the same convention as common.yml — compiled JS
+  # lives directly under dist/ because tsc collapses rootDir to lib/.
+  processor: "./dist/fixtures.js"
+
+  phases:
+    # 50 VUs arriving over 10 s. Combined with the ~5–10 s per-request
+    # latency of a 5 MiB upload, this produces ~50 concurrent inflight
+    # requests at the peak — which is the stress condition for the
+    # workspace-quota lock.
+    - name: "50-concurrent-5mb-uploads"
+      arrivalCount: 50
+      duration: 10
+
+  variables:
+    # Populated by the orchestrator (F1) before invoking Artillery. Having
+    # a named variable here keeps the hot path in the flow readable and
+    # makes it obvious which knobs the short-run test overrides.
+    seededItemId: "{{ $processEnvironment.PERF_SEEDED_ITEM_ID }}"
+
+scenarios:
+  - name: "upload-5mb-to-seeded-item"
+    # Per-scenario auth: the `setAuthToken` hook (already in fixtures.ts
+    # from D2) logs in once per worker and caches the access token.
+    beforeScenario: "setAuthToken"
+    flow:
+      - post:
+          url: "/api/v1/items/{{ seededItemId }}/files"
+          # `attachFilePayload` is the hook that populates requestParams
+          # with multipart/form-data carrying the 5 MiB Buffer from
+          # generate5MbPayload(). Declared in fixtures.ts (added alongside
+          # the F1 orchestrator or a dedicated follow-up task — this YAML
+          # only references the name).
+          beforeRequest: "attachFilePayload"
+          headers:
+            authorization: "Bearer {{ authToken }}"
+          # Record both the 201 success and 413 quota-rejection as
+          # expected outcomes — Artillery's default behaviour treats any
+          # non-2xx as an error, which would skew the pass/fail metric.
+          # The orchestrator's post-run SQL query is the actual integrity
+          # oracle; here we just want the codes counted.
+          expect:
+            - statusCode: [201, 413]
