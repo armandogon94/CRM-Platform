@@ -32,3 +32,59 @@ services:
       REDIS_URL: redis://redis:6379
     tmpfs:
       - /app/uploads
+
+  # ─── Slice 19B: Visual regression runner ───────────────────────────
+  #
+  # Pinned Playwright container for deterministic screenshot captures.
+  # The image version MUST match the @playwright/test version in
+  # e2e/package-lock.json (currently 1.59.1) so container browsers and
+  # host toolchain stay in lock-step — mismatched versions produce
+  # fake diffs from font/rasterization drift.
+  #
+  # Activation: the `visual` profile keeps this service dormant during
+  # the regular `docker compose up` used by Slice 19 functional e2e.
+  # Run explicitly:
+  #
+  #   docker compose -f docker-compose.yml -f docker-compose.e2e.yml \
+  #     --profile visual run --rm e2e-visual
+  #
+  # The default `command` targets playwright.visual.config.ts which is
+  # produced by Task A2; defining the service before the config exists
+  # is intentional (service definition is static; execution is opt-in).
+  #
+  # node_modules is an anonymous volume so the host's (possibly empty
+  # or arch-mismatched) e2e/node_modules cannot shadow the preinstalled
+  # Playwright runtime baked into the mcr.microsoft.com/playwright image.
+  e2e-visual:
+    image: mcr.microsoft.com/playwright:v1.59.1-jammy
+    container_name: crm-e2e-visual
+    working_dir: /e2e
+    profiles:
+      - visual
+    environment:
+      # Host-run guard escape hatch: globalSetup treats the suite as
+      # container-hosted when this is "true" and skips the host-only
+      # port sniffing / localhost assumptions.
+      E2E_DOCKER: "true"
+      # Pass through CI if the caller sets it (GitHub Actions, etc.).
+      CI: ${CI:-}
+      # globalSetup expects an admin credential to bootstrap workspaces;
+      # default to the documented fixture password, allow override.
+      E2E_ADMIN_PASSWORD: ${E2E_ADMIN_PASSWORD:-admin}
+      # Containerised Playwright must reach the backend via the docker
+      # network service name, not localhost.
+      BACKEND_URL: http://backend:13000
+    volumes:
+      # Bind the e2e source tree read-write so Playwright can update
+      # __screenshots__ baselines on the host from inside the container.
+      - ./e2e:/e2e:rw
+      # Anonymous volume masks any host-installed node_modules and
+      # preserves the image's preinstalled Playwright CLI + browsers.
+      - /e2e/node_modules
+    networks:
+      - crm-network
+    command:
+      - npx
+      - playwright
+      - test
+      - --config=playwright.visual.config.ts
