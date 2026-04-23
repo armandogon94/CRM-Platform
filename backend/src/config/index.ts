@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { isPerfMode, perfDatabaseName } from './perf';
 
 dotenv.config();
 
@@ -37,16 +38,38 @@ export interface AppConfig {
   corsOrigins: string[];
   rateLimit: RateLimitConfig;
   upload: UploadConfig;
+  /** 'debug' | 'info' | 'warn' | 'error' — logger threshold. */
+  logLevel: string;
+  /** morgan + verbose request logging. Off in perf + test. */
+  requestLogging: boolean;
+  /** Enables admin/debug endpoints. Off in perf + prod. */
+  debugEnabled: boolean;
 }
 
+const env = process.env.NODE_ENV || 'development';
+const perf = isPerfMode();
+
+// Perf-mode defaults: silence logs, disable debug routes, target crm_perf DB.
+// Dev/test/prod keep their previous behaviour untouched.
+const logLevel = perf
+  ? 'error'
+  : env === 'production'
+  ? 'info'
+  : env === 'test'
+  ? 'error'
+  : 'debug';
+
+const requestLogging = !perf && env !== 'test';
+const debugEnabled = !perf && env !== 'production';
+
 const config: AppConfig = {
-  env: process.env.NODE_ENV || 'development',
+  env,
   port: parseInt(process.env.PORT || '13000', 10),
 
   database: {
     host: process.env.DB_HOST || 'localhost',
     port: parseInt(process.env.DB_PORT || '5432', 10),
-    name: process.env.DB_NAME || 'crm_platform',
+    name: process.env.DB_NAME || (perf ? perfDatabaseName : 'crm_platform'),
     user: process.env.DB_USER || 'crm_admin',
     password: process.env.DB_PASSWORD || 'crm_secret_2026',
   },
@@ -72,6 +95,10 @@ const config: AppConfig = {
     maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760', 10),
     maxWorkspaceStorage: parseInt(process.env.MAX_WORKSPACE_STORAGE || '524288000', 10),
   },
+
+  logLevel,
+  requestLogging,
+  debugEnabled,
 };
 
 export default config;

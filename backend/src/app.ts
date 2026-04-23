@@ -4,6 +4,7 @@ import cors from 'cors';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import config from './config';
+import { isPerfMode } from './config/perf';
 import routes from './routes';
 import { notFoundHandler, errorHandler } from './middleware/errorHandler';
 import { logger } from './utils/logger';
@@ -57,8 +58,11 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ---------------------------------------------------------------------------
 // HTTP request logging
+//   Skipped in:
+//     - test mode (noisy jest output)
+//     - perf mode (Slice 19C — morgan's synchronous write skews latency)
 // ---------------------------------------------------------------------------
-if (config.env !== 'test') {
+if (config.env !== 'test' && !isPerfMode()) {
   app.use(morgan('dev'));
 }
 

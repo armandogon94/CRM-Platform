@@ -17,6 +17,7 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth';
+import { isPerfMode } from '../config/perf';
 import E2EResetService from '../services/E2EResetService';
 import { seedNovaPayE2eFixture } from '../seeds/novapay/workspace';
 import { seedNovaPayE2eFlaggedAutomation } from '../seeds/novapay/automations';
@@ -38,12 +39,18 @@ async function rebuildFixture(): Promise<void> {
  * Env-guard middleware. Must come BEFORE `authenticate` so unauthenticated
  * probes get the same 404 response and cannot distinguish "route hidden"
  * from "route requires auth".
+ *
+ * Returns 404 when ANY of the following hold:
+ *   - `NODE_ENV=production` (this route must never ship to prod)
+ *   - `NODE_ENV=perf` (Slice 19C — perf runs must not mutate workspace
+ *     state; defence in depth alongside the compose-level isolation)
+ *   - `E2E_RESET_ENABLED` is anything other than the literal string `"true"`
  */
 export function e2eEnvGuard(req: Request, res: Response, next: NextFunction): void {
   const isProd = process.env.NODE_ENV === 'production';
   const enabled = process.env.E2E_RESET_ENABLED === 'true';
 
-  if (isProd || !enabled) {
+  if (isProd || isPerfMode() || !enabled) {
     const response: ApiResponse = {
       success: false,
       error: `Route not found: ${req.method} ${req.originalUrl}`,
