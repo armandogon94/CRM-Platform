@@ -70,9 +70,11 @@ function getTimelineValue(
 export function TimelineView({
   board,
   items,
-  onItemUpdate,
-  onItemCreate,
-  onItemDelete,
+  // Dispatch props accepted for BoardView-level API symmetry but
+  // not yet wired — Timeline edits are Slice 22+ territory.
+  onItemUpdate: _onItemUpdate,
+  onItemCreate: _onItemCreate,
+  onItemDelete: _onItemDelete,
 }: TimelineViewProps) {
   const [viewDate, setViewDate] = useState(new Date());
   const [scale, setScale] = useState<'weeks' | 'months'>('weeks');

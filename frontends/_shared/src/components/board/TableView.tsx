@@ -229,7 +229,7 @@ function GroupSection({
   );
 }
 
-export function TableView({ board, items, onItemUpdate, onItemCreate, onItemDelete }: TableViewProps) {
+export function TableView({ board, items, onItemUpdate, onItemCreate, onItemDelete: _onItemDelete }: TableViewProps) {
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
   const columns = (board.columns || []).sort((a, b) => a.position - b.position);
   const groups = (board.groups || []).sort((a, b) => a.position - b.position);

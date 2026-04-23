@@ -1,5 +1,4 @@
-import React from 'react';
-import { Check, X, ExternalLink, Paperclip, Star, Mail, Phone } from 'lucide-react';
+import { Check, ExternalLink, Paperclip, Star, Mail, Phone } from 'lucide-react';
 import type { Column } from '../../types/index';
 import { StatusBadge } from '../common/StatusBadge';
 import { PersonAvatar } from '../common/PersonAvatar';

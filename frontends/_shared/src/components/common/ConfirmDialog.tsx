@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useRef } from 'react';
 
 /**
  * Reusable confirmation modal — Slice 20 B1.

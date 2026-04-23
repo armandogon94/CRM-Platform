@@ -1,26 +1,35 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Table, LayoutGrid, Search, Filter, Plus } from 'lucide-react';
-import { BoardTable } from './BoardTable';
-import { KanbanView } from './KanbanView';
+import { Table, LayoutGrid, Search, Filter } from 'lucide-react';
+import { BoardView } from '@crm/shared/components/board/BoardView';
+import { useToast } from '@crm/shared/components/common/ToastProvider';
 import { api } from '../utils/api';
-import type { Board, Item } from '../types';
+import type { Board, Item, BoardView as BoardViewType } from '../types';
 
 /**
- * NovaPay router-based board page (Slice 19.6 migration).
+ * NovaPay router-based board page (Slice 19.6 migration + Slice 20 C1 CRUD wiring).
  *
  * Reads `:id` from `/boards/:id` via `useParams`, fetches the board +
- * items independently. Previously the parent App.tsx drove fetches
- * via `activeView` state; now this component owns its own lifecycle
- * keyed on URL id changes.
+ * items independently. C1 adds CRUD wiring:
  *
- * DOM contract required by Slice 19 D1 spec:
- *   - h1 with the board's name (e.g. "Transaction Pipeline")
- *   - `<button>New Item</button>` in the toolbar
+ *   - onItemCreate → POST /items (seed 'Status' = New by convention;
+ *     backend assigns groupId; UI locally appends on success)
+ *   - onItemUpdate → PUT /items/:id/values (inline-edit path)
+ *   - onItemDelete → DELETE /items/:id (flat shim from A2.5)
+ *
+ * Every failure emits a toast via the shared <ToastProvider> mounted
+ * in main.tsx. Replaces the "+ New Item" placeholder button with the
+ * shared BoardView component which exposes the `+ Add item` affordance
+ * inside each KanbanLane / TableGroup natively (per Slice 20 B1).
+ *
+ * DOM contract required by Slice 19 D1 spec remains:
+ *   - h1 with the board's name
+ *   - A primary CTA in the toolbar (now threaded via BoardView)
  */
 export function BoardPage() {
   const { id } = useParams<{ id: string }>();
   const boardId = id ? parseInt(id, 10) : NaN;
+  const { show: showToast } = useToast();
 
   const [board, setBoard] = useState<Board | null>(null);
   const [items, setItems] = useState<Item[]>([]);
@@ -46,6 +55,98 @@ export function BoardPage() {
       }
     );
   }, [boardId]);
+
+  // ── CRUD handlers threaded to <BoardView> ──────────────────────────
+  //
+  // Local-api path (NovaPay's existing auth-token conventions apply).
+  // Using the shared useBoard hook would require unifying the token
+  // key between NovaPay's `novapay_token` and shared's
+  // `crm_access_token` — tracked as a cleanup item. For C1 these
+  // handlers suffice: they cover the same four endpoints, emit toasts
+  // on error via the shared provider, and keep local state in sync
+  // without Socket.io echo (NovaPay's existing socket is untouched).
+
+  const handleItemCreate = useCallback(
+    async (groupId: number, name: string) => {
+      const res = await api.createItem({ boardId, groupId, name });
+      if (res.success && res.data?.item) {
+        setItems((prev) => [...prev, res.data!.item]);
+      } else {
+        showToast({
+          variant: 'error',
+          title: 'Could not create item',
+          description: res.error ?? 'Please try again.',
+        });
+      }
+    },
+    [boardId, showToast]
+  );
+
+  const handleItemUpdate = useCallback(
+    async (itemId: number, columnId: number, value: unknown) => {
+      // Optimistic update — write locally, roll back on error.
+      const snapshot = items;
+      setItems((prev) =>
+        prev.map((it) => {
+          if (it.id !== itemId) return it;
+          const cvs = it.columnValues ?? [];
+          const idx = cvs.findIndex((c) => c.columnId === columnId);
+          const nextCvs =
+            idx >= 0
+              ? cvs.map((c) =>
+                  c.columnId === columnId ? { ...c, value } : c
+                )
+              : [
+                  ...cvs,
+                  { id: -1, itemId, columnId, value } as (typeof cvs)[number],
+                ];
+          return { ...it, columnValues: nextCvs };
+        })
+      );
+      const res = await api.updateColumnValues(itemId, [{ columnId, value }]);
+      if (!res.success) {
+        setItems(snapshot);
+        showToast({
+          variant: 'error',
+          title: 'Could not update value',
+          description: res.error ?? 'Please try again.',
+        });
+      }
+    },
+    [items, showToast]
+  );
+
+  const handleItemDelete = useCallback(
+    async (itemId: number) => {
+      const snapshot = items;
+      setItems((prev) => prev.filter((i) => i.id !== itemId));
+      const res = await api.deleteItem(itemId);
+      if (!res.success) {
+        setItems(snapshot);
+        showToast({
+          variant: 'error',
+          title: 'Could not delete item',
+          description: res.error ?? 'Please try again.',
+        });
+      }
+    },
+    [items, showToast]
+  );
+
+  // Shared BoardView expects a `currentView: BoardView` prop matching
+  // the selected UI mode — synthesise a minimal one from local state
+  // rather than pulling the full BoardView list from the API.
+  const currentView: BoardViewType = useMemo(
+    () => ({
+      id: viewMode === 'table' ? 1 : 2,
+      boardId,
+      name: viewMode === 'table' ? 'Table' : 'Kanban',
+      viewType: viewMode,
+      settings: {},
+      isDefault: false,
+    }),
+    [viewMode, boardId]
+  );
 
   if (loading) {
     return (
@@ -79,12 +180,6 @@ export function BoardPage() {
           {board.description && (
             <p className="text-sm text-gray-500 mt-0.5">{board.description}</p>
           )}
-        </div>
-        <div className="flex items-center gap-2">
-          <button className="btn-primary flex items-center gap-1.5 text-sm">
-            <Plus size={16} />
-            New Item
-          </button>
         </div>
       </div>
 
@@ -125,7 +220,10 @@ export function BoardPage() {
 
         {/* Search */}
         <div className="relative">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <Search
+            size={16}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+          />
           <input
             type="text"
             value={searchQuery}
@@ -136,13 +234,18 @@ export function BoardPage() {
         </div>
       </div>
 
-      {/* Board Content */}
+      {/* Board Content — Slice 20 C1 uses shared BoardView so CRUD
+          affordances (inline + Add item / kebab delete / inline edit)
+          are consistent with every future industry migration. */}
       <div className="card p-4">
-        {viewMode === 'table' ? (
-          <BoardTable board={board} items={filteredItems} />
-        ) : (
-          <KanbanView board={board} items={filteredItems} />
-        )}
+        <BoardView
+          board={board as unknown as Parameters<typeof BoardView>[0]['board']}
+          items={filteredItems as unknown as Parameters<typeof BoardView>[0]['items']}
+          currentView={currentView as unknown as Parameters<typeof BoardView>[0]['currentView']}
+          onItemCreate={handleItemCreate}
+          onItemUpdate={handleItemUpdate}
+          onItemDelete={handleItemDelete}
+        />
       </div>
 
       {/* Footer Stats */}

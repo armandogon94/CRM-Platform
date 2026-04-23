@@ -88,6 +88,10 @@ export const api = {
       body: JSON.stringify({ values }),
     }),
 
+  // Slice 20 C1: wires to the flat DELETE /items/:id shim added in A2.5.
+  deleteItem: (id: number) =>
+    request<null>(`/items/${id}`, { method: 'DELETE' }),
+
   // Automations
   getAutomations: (boardId: number) =>
     request<{ automations: Automation[] }>(`/automations?boardId=${boardId}`),

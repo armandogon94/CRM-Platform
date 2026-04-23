@@ -1,5 +1,3 @@
-import React from 'react';
-
 interface PersonAvatarProps {
   name: string;
   avatar?: string | null;

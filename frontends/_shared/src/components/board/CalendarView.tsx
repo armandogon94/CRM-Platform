@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   startOfMonth,
@@ -18,6 +18,9 @@ import type { Board, Column, Item, ColumnValue } from '../../types/index';
 interface CalendarViewProps {
   board: Board;
   items: Item[];
+  // Accepted for API compatibility with BoardView's dispatch — not
+  // consumed by CalendarView's current read-only surface. Will be
+  // wired when Slice 22+ adds calendar-cell drag/create flows.
   onItemUpdate?: (itemId: number, columnId: number, value: any) => void;
   onItemCreate?: (groupId: number, name: string) => void;
   onItemDelete?: (itemId: number) => void;
@@ -43,9 +46,12 @@ function getGroupColor(item: Item, groups: Board['groups']): string {
 export function CalendarView({
   board,
   items,
-  onItemUpdate,
-  onItemCreate,
-  onItemDelete,
+  // Parameters intentionally unused at this view level — see
+  // interface comment. Prefixed with `_` to signal intent to
+  // strict-linting consumers (NovaPay sets noUnusedParameters).
+  onItemUpdate: _onItemUpdate,
+  onItemCreate: _onItemCreate,
+  onItemDelete: _onItemDelete,
 }: CalendarViewProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
