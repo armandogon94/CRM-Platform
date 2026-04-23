@@ -1,0 +1,151 @@
+# Scenario (b) — WebSocket fan-out — Slice 19C Task E2.
+#
+# Exercise the Socket.io broadcast path under SPEC §19C's 500-client target:
+#   - 500 subscribers ramp into a single board room over 60 s.
+#   - 1 publisher emits `item:updated` at 2 events/sec for 5 min.
+#   - Each subscriber computes (clientNow - payload.server_ts) and emits
+#     it as the `fanOutLatency` histogram — this is the core SLO signal.
+#
+# Invariants this file protects (see __tests__/scenario-b.test.ts):
+#   - config.engines includes socketio-v3 (wire-compatible with Socket.io v4).
+#   - config.target is ws://{{ $processEnvironment.BACKEND_HOST_PORT }} — no
+#     http:// scheme (Artillery's socketio engine accepts ws:// directly and
+#     skips a redundant HTTP upgrade round-trip per connection).
+#   - processor points at the compiled fixtures module so setAuthToken /
+#     recordFanOutLatency / stampServerTs hooks are callable.
+#   - Exactly two scenarios — subscriber (weight 500) and publisher (weight 1).
+#   - `short` environment drops the load to 50 subscribers + 1 publisher with
+#     60 s sustain so CI can run the scenario pattern without the 5-min wait.
+#
+# Notes on event names:
+#   The real backend's WebSocketService listens for `board:subscribe` to join
+#   a per-board room (backend/src/services/WebSocketService.ts). The SPEC and
+#   task prompt use the informal phrase "join the board room" / "board:join";
+#   we use the canonical `board:subscribe` here so the scenario works against
+#   the real server without any server-side shim.
+
+config:
+  # socketio engine accepts ws:// directly; the orchestrator sets
+  # BACKEND_HOST_PORT to backend:13000 inside the perf compose network.
+  target: "ws://{{ $processEnvironment.BACKEND_HOST_PORT }}"
+
+  # Shared processor compiled from lib/fixtures.ts by `npm run build` before
+  # Artillery is invoked. Path is relative to the directory Artillery is run
+  # from (e2e/perf/). Matches artillery/common.yml.
+  processor: "./dist/fixtures.js"
+
+  engines:
+    # Built-in Artillery engine — compatible with Socket.io v4 server per
+    # SPEC §19C ADR. Empty object == use default client options.
+    socketio-v3: {}
+
+  # Socket.io client-side options applied to every scenario's connection.
+  # `auth: { token }` is the JWT handshake the backend expects (see
+  # WebSocketService.ts: `socket.handshake.auth.token`). {{ authToken }} is
+  # templated in at scenario start by the setAuthToken hook.
+  socketio:
+    auth:
+      token: "{{ authToken }}"
+    transports:
+      # Force WebSocket transport — we don't want long-polling fallback to
+      # skew fan-out latency numbers. Socket.io v4 supports ws directly.
+      - "websocket"
+
+  # VUs drip in linearly. arrivalCount gives us an exact 501 total
+  # (500 subscribers + 1 publisher) weighted across the two scenarios below.
+  phases:
+    - name: "ramp"
+      duration: 60
+      arrivalCount: 501
+    - name: "sustain"
+      duration: 300
+      arrivalCount: 0
+
+  environments:
+    # Short-run: 51 total VUs (50 subscribers + 1 publisher), 60 s sustain.
+    # Used by __tests__ and CI smoke runs. `PERF_SHORT_RUN=1 artillery run -e short ...`
+    short:
+      config:
+        phases:
+          - name: "ramp"
+            duration: 10
+            arrivalCount: 51
+          - name: "sustain"
+            duration: 60
+            arrivalCount: 0
+
+scenarios:
+  # -------------------------------------------------------------------------
+  # Subscriber — joins the board room and measures fan-out latency.
+  #
+  # Weight 500 means Artillery picks this scenario 500 / 501 ≈ 99.8% of the
+  # time for each arriving VU. Combined with arrivalCount=501 (or 51 in
+  # short mode), that lands exactly 500 subscribers (50 short) + 1 publisher
+  # with negligible variance across runs.
+  # -------------------------------------------------------------------------
+  - name: "subscriber"
+    engine: "socketio-v3"
+    weight: 500
+    beforeScenario: "setAuthToken"
+    flow:
+      # Join the per-board fan-out room. boardId=1 is the first seeded board
+      # from seed-perf.ts; the scenario pins every VU to the same board on
+      # purpose so the publisher's emit fans out across all 500 subscribers.
+      - emit:
+          channel: "board:subscribe"
+          data: 1
+
+      # Listen for item:updated, then funnel each payload through
+      # recordFanOutLatency so the hook can compute (clientNow - server_ts)
+      # and emit it as a histogram. The response block is scoped to a
+      # subsequent no-op emit to keep Artillery's state machine happy while
+      # the subscriber holds the socket open for the sustain window.
+      - emit:
+          channel: "board:keepalive"
+          data: 1
+        response:
+          on: "item:updated"
+          function: "recordFanOutLatency"
+
+      # Hold the connection open for the sustain phase (5 min full / 60 s
+      # short). Artillery's `think` is seconds; during this window the
+      # socket stays open and the `response.on: item:updated` listener keeps
+      # firing recordFanOutLatency for every broadcast. 305 s is the full
+      # phase duration + a 5 s grace to catch the tail.
+      - think: 305
+
+  # -------------------------------------------------------------------------
+  # Publisher — fires item:updated at 2 Hz for the full sustain window.
+  #
+  # One copy of this flow runs per test thanks to weight: 1. The publisher
+  # stamps server_ts on every payload via stampServerTs so subscribers can
+  # compute fan-out latency deterministically (no clock skew between clients
+  # because only the publisher's clock matters).
+  # -------------------------------------------------------------------------
+  - name: "publisher"
+    engine: "socketio-v3"
+    weight: 1
+    beforeScenario: "setAuthToken"
+    flow:
+      # Publisher joins the same room so the server-side broadcast reaches
+      # the subscribers. This mirrors how an authenticated user would emit
+      # item updates via the REST layer; we shortcut here to keep the
+      # scenario focused on fan-out behaviour, not REST throughput.
+      - emit:
+          channel: "board:subscribe"
+          data: 1
+
+      # Emit 2 events/sec for 5 min = 600 total events at full scale
+      # (or 120 at short scale given the 60 s sustain). stampServerTs
+      # refreshes context.vars.server_ts immediately before each emit;
+      # the emit templates it into the payload.
+      - loop:
+          - function: "stampServerTs"
+          - emit:
+              channel: "item:updated"
+              data:
+                boardId: 1
+                itemId: "{{ $randomNumber(1, 1000) }}"
+                server_ts: "{{ server_ts }}"
+          - think: 0.5
+        count: 600
