@@ -78,6 +78,13 @@ function AuthenticatedShell() {
   }, [boards, location.pathname]);
 
   // Load automations when the /automations route is active.
+  //
+  // The backend `GET /automations` endpoint uses `paginatedResponse`, which
+  // returns `{ success, data: Automation[], pagination }` — `data` is a flat
+  // array, NOT `{ automations: [...] }`. The 9 other industries already
+  // defend against both shapes; NovaPay was the only industry with the
+  // strict lookup that silently produced empty panels. (Slice 19.7 QA bug
+  // B3 — root cause: response-shape/type mismatch.)
   useEffect(() => {
     if (location.pathname !== '/automations') return;
     const load = async () => {
@@ -85,7 +92,11 @@ function AuthenticatedShell() {
       for (const board of boards) {
         const res = await api.getAutomations(board.id);
         if (res.success && res.data) {
-          allAutos.push(...(res.data.automations || []));
+          const payload = res.data as unknown;
+          const autos: Automation[] = Array.isArray(payload)
+            ? (payload as Automation[])
+            : ((payload as { automations?: Automation[] }).automations || []);
+          allAutos.push(...autos);
         }
       }
       setAutomations(allAutos);
