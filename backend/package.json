@@ -10,6 +10,7 @@
     "test": "jest --forceExit --detectOpenHandles",
     "migrate": "sequelize db:migrate",
     "reset:e2e": "ts-node src/scripts/reset-e2e.ts",
+    "seed:perf": "NODE_ENV=perf ts-node src/scripts/seed-perf.ts",
     "seed": "ts-node src/seeds/index.ts",
     "seed:novapay": "ts-node src/seeds/novapay/index.ts",
     "seed:medvista": "ts-node src/seeds/medvista/index.ts",
