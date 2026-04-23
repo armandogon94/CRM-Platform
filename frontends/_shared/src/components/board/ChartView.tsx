@@ -13,6 +13,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import type { Board, Item } from '../../types/index';
+import { normalizeStatusValue } from '../../utils/status';
 
 interface ChartViewProps {
   board: Board;
@@ -32,10 +33,15 @@ export const ChartView: React.FC<ChartViewProps> = ({ board, items }) => {
     const counts: Record<string, { name: string; count: number; color: string }> = {};
     const labels = (statusColumn.config as any)?.labels || [];
 
+    const options = (statusColumn.config as { options?: { label: string; color: string; id?: string }[] })?.options;
     for (const item of items) {
       const cv = item.columnValues?.find((v) => v.columnId === statusColumn.id);
-      const label = cv?.value?.label || 'No Status';
-      const color = cv?.value?.color || '#c4c4c4';
+      // Coerce the three historical seed shapes through the shared
+      // normaliser so the pie chart counts every item against a real status
+      // bucket, not just the canonical `{ label, color }` ones.
+      const normalised = normalizeStatusValue(cv?.value, options);
+      const label = normalised?.label ?? 'No Status';
+      const color = normalised?.color ?? '#c4c4c4';
       if (!counts[label]) counts[label] = { name: label, count: 0, color };
       counts[label].count++;
     }

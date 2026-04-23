@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Plus } from 'lucide-react';
 import type { Board, Column, Item, ColumnValue } from '../../types/index';
 import { ColumnRenderer } from './ColumnRenderer';
+import { normalizeStatusValue, type StatusOption } from '../../utils/status';
 
 interface KanbanViewProps {
   board: Board;
@@ -19,7 +20,11 @@ function getStatusValue(
   const cv = item.columnValues?.find(
     (v: ColumnValue) => v.columnId === statusColumn.id
   );
-  return cv?.value as { label: string; color: string } | null;
+  // Normalise the raw value through the shared helper — this is the bucket
+  // key used by every Kanban lane, so non-canonical seed shapes (plain
+  // strings, `{ labelId }`) must still route items to the right lane.
+  const options = (statusColumn.config as { options?: StatusOption[] })?.options;
+  return normalizeStatusValue(cv?.value, options);
 }
 
 function getColumnValue(item: Item, columnId: number): any {

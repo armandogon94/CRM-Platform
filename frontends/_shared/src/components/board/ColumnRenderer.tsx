@@ -3,6 +3,7 @@ import { Check, X, ExternalLink, Paperclip, Star, Mail, Phone } from 'lucide-rea
 import type { Column } from '../../types/index';
 import { StatusBadge } from '../common/StatusBadge';
 import { PersonAvatar } from '../common/PersonAvatar';
+import { normalizeStatusValue, type StatusOption } from '../../utils/status';
 
 interface ColumnRendererProps {
   column: Column;
@@ -54,12 +55,16 @@ export function ColumnRenderer({ column, value, compact = false }: ColumnRendere
 
   switch (column.columnType) {
     case 'status': {
-      const v = value as { label: string; color: string };
-      if (!v.label) return <span className="text-gray-300">-</span>;
+      // Normalise the three historical seed shapes (string / {label,color} /
+      // {labelId}) to a canonical { label, color }. See utils/status.ts for
+      // the full rationale.
+      const options = (column.config as { options?: StatusOption[] })?.options;
+      const normalised = normalizeStatusValue(value, options);
+      if (!normalised) return <span className="text-gray-300">-</span>;
       return (
         <StatusBadge
-          label={v.label}
-          color={v.color || '#6B7280'}
+          label={normalised.label}
+          color={normalised.color}
           size={compact ? 'sm' : 'md'}
         />
       );
