@@ -35,15 +35,16 @@ setup('authenticate as NovaPay e2e user', async ({ page, baseURL }) => {
   await page.getByLabel(/password/i).fill(NOVAPAY_E2E_PASSWORD);
   await page.getByRole('button', { name: /log ?in|sign ?in/i }).click();
 
-  // Board list page is the post-login landing per SPEC §Slice 19 flow 1.
-  await page.waitForURL(/\/boards(\/|$|\?)/, { timeout: 15_000 });
-
-  // Sanity-check the session took — if login silently failed, the sidebar
-  // user chip (or a logout affordance) would be absent.
+  // Wait for the post-login UI to render. NovaPay uses state-based
+  // navigation (no react-router), so we don't watch the URL — we
+  // watch for a DOM affordance that only exists when authenticated.
+  // This works equally well for router-based frontends. The logout
+  // button is present across the shared Sidebar used by all 10
+  // industries and also in NovaPay's own layout.
   await expect(
     page.getByRole('button', { name: /log ?out|sign ?out/i })
       .or(page.getByRole('link', { name: /log ?out|sign ?out/i }))
-  ).toBeVisible({ timeout: 5_000 });
+  ).toBeVisible({ timeout: 15_000 });
 
   // Persist cookies + localStorage. Playwright creates parent dirs.
   await page.context().storageState({ path: AUTH_STATE_FILE });
