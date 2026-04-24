@@ -317,6 +317,63 @@ Pre-C1 reading revealed that **none of the 10 industry frontends consume the `@c
 
 Slice 20B would extend C0's integration to the remaining 7 industries.
 
+---
+
+### Task C0: Wire `@crm/shared` into industry shells (per-industry)
+
+**Description:** Add the plumbing so industry shells can import from `@crm/shared/...`. Three changes per industry; no existing component migration. Forked local components become dead code (kept in place — removed by a future cleanup slice).
+
+**Per-industry changes:**
+
+1. **`frontends/<industry>/package.json`** — add to `dependencies`:
+   ```jsonc
+   "@crm/shared": "file:../_shared"
+   ```
+2. **`frontends/<industry>/tsconfig.json`** — extend `paths`:
+   ```jsonc
+   "paths": {
+     "@/*": ["./src/*"],
+     "@crm/shared/*": ["../_shared/src/*"]
+   }
+   ```
+3. **`frontends/<industry>/vite.config.ts`** — extend `resolve.alias`:
+   ```ts
+   alias: {
+     '@': path.resolve(__dirname, './src'),
+     '@crm/shared': path.resolve(__dirname, '../_shared/src'),
+   }
+   ```
+4. Run `npm install` in the industry directory to create the symlink.
+5. Add a sanity-import line somewhere innocuous (e.g. in `main.tsx`) importing a shared symbol and using it, to prove the toolchain works:
+   ```ts
+   import { INDUSTRY_THEMES } from '@crm/shared/theme';
+   // intentionally referenced to prevent tree-shake stripping during verification
+   void INDUSTRY_THEMES;
+   ```
+   (Remove the `void` line in C1 when real usage replaces it.)
+
+**Acceptance criteria:**
+- [ ] `@crm/shared` declared as `file:../_shared` dep
+- [ ] `tsconfig.json` path alias added
+- [ ] `vite.config.ts` resolve alias added
+- [ ] `node_modules/@crm/shared` symlink exists after `npm install`
+- [ ] Sanity import resolves at typecheck AND at build
+- [ ] `npx tsc --noEmit` — clean
+- [ ] `npm run build` — succeeds
+- [ ] Forked local components untouched (`git diff` shows only 3 config files + main.tsx sanity import)
+
+**Dependencies:** Phase A + B merged (so there's something worth importing). No cross-industry dependency — 3 tasks can run in parallel once A+B are done.
+
+**Files touched (≤4 per industry):**
+- `frontends/<industry>/package.json`
+- `frontends/<industry>/tsconfig.json`
+- `frontends/<industry>/vite.config.ts`
+- `frontends/<industry>/src/main.tsx` (sanity import — removed in C1/C2/C3)
+
+**Parallelization:** C0-NovaPay runs single-threaded first to validate the configuration pattern. Then C0-MedVista + C0-JurisPath run as parallel worktree-isolated Opus subagents (independent file trees, no conflict).
+
+**Size:** S per industry. 3 tasks total.
+
 ### Task C1: NovaPay CRUD wiring
 
 **Description:** Mount `<ToastProvider>` at the app root. Thread `createItem`, `updateItemValue`, `deleteItem` from `useBoard` through to the BoardView component. Gate CRUD affordances behind `useCanEdit()`. NovaPay is router-based so integration is on `BoardPage` + `BoardListPage` routes.
@@ -397,12 +454,36 @@ Slice 20B would extend C0's integration to the remaining 7 industries.
 
 ---
 
+### Task C4 (DISCOVERED during D3): BoardListPage adoption + RBAC gating
+
+**Description:** Surfaced while writing the Phase D Flow E (create-board) and RBAC-viewer specs:
+
+- All 3 industries (NovaPay / MedVista / JurisPath) still use their LOCAL forked `BoardListPage.tsx` components. None of them render a "New Board" button. C1/C2/C3 migrated only `BoardPage` (the per-board surface) to the shared `BoardView` — `BoardListPage` was left untouched per the "symmetric with C1 scope" guidance.
+- RBAC affordance gating via `useCanEdit()` (landed in A4) is NOT wired into the shared `BoardView` render paths today. The shared `KanbanView` / `TableView` accept `onItemCreate` / `onItemDelete` props and render the affordances when those props are provided — they don't check role. Industry `BoardPage` components pass the callbacks unconditionally, so `viewer`-role users currently see "+ Add item" and kebab menus in the UI (though server still 403s on write).
+
+**Acceptance criteria:**
+- [ ] All 3 industries' `/boards` route renders `@crm/shared/pages/BoardListPage` (not the local fork)
+- [ ] Industry `BoardPage` gates `onItemCreate` / `onItemUpdate` / `onItemDelete` prop-passing behind `useCanEdit()` — viewer role gets `undefined` callbacks → shared components render no affordances
+- [ ] Local forked `BoardListPage.tsx` files left in place as dead code (cleanup slice removes them later)
+- [ ] `e2e/specs/slice-20/create-board.spec.ts` transitions from skipped to passing across all 3 industries
+- [ ] `e2e/specs/slice-20/rbac-viewer.spec.ts` passes across all 3 industries
+
+**Files touched (≤3 per industry):**
+- `frontends/<industry>/src/App.tsx` — import shared `BoardListPage`, route `/boards` to it (or replace inline usage)
+- `frontends/<industry>/src/components/BoardPage.tsx` — gate CRUD callbacks with `useCanEdit()` before passing to `<BoardView>`
+- The shared `WorkspaceProvider` must wrap the app (shared `BoardListPage` calls `useWorkspace()`).
+
+**Size:** M per industry. 3 tasks total — parallelizable as worktree agents once the shared `WorkspaceProvider` mount pattern is validated on NovaPay first.
+
+---
+
 ### ✅ Checkpoint: Phase C industry wiring
 
 - [ ] C1, C2, C3 merged as separate commits
 - [ ] All 3 industries typecheck + build clean
-- [ ] Manual smoke on each: login as admin, create an item, edit a status, delete an item, create a board — all work
+- [ ] Manual smoke on each: login as admin, create an item, edit a status, delete an item
 - [ ] `@crm/shared` tests still 100% green (no shared-lib regression)
+- [ ] C4 (BoardListPage adoption + RBAC gating) tracked as a follow-up task — keeps Phase C scope tight without losing the Flow E / viewer-role coverage the spec promised.
 - [ ] Review with human before E2E phase
 
 ---

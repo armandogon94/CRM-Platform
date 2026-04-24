@@ -26,6 +26,9 @@ const MEDVISTA_USERS = [
   // 2 Admin staff
   { email: 'admin@medvista.com', firstName: 'Amanda', lastName: 'Foster', role: 'admin' as const },
   { email: 'billing@medvista.com', firstName: 'Carlos', lastName: 'Reyes', role: 'member' as const },
+  // Slice 20 D3 — RBAC spec target: proves viewer role sees no CRUD
+  // affordances on the MedVista shell.
+  { email: 'viewer@medvista.com', firstName: 'Guest', lastName: 'Viewer', role: 'viewer' as const },
 ];
 
 export async function seedMedVistaWorkspace(): Promise<MedVistaContext> {
