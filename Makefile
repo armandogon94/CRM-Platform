@@ -59,7 +59,51 @@ INDUSTRY_FRONTENDS := \
 	edupulse-frontend
 
 .PHONY: e2e e2e-desktop e2e-mobile e2e-ui e2e-visual e2e-visual-update e2e-visual-ui \
-	e2e-perf e2e-perf-seed-only e2e-perf-scenario e2e-perf-set-baseline e2e-perf-teardown
+	e2e-perf e2e-perf-seed-only e2e-perf-scenario e2e-perf-set-baseline e2e-perf-teardown \
+	test-shared e2e-slice-20
+
+# ─────────────────────────────────────────────────────────────────────
+# Slice 20 — CRUD UI wiring (SPEC §Slice 20)
+# ─────────────────────────────────────────────────────────────────────
+
+# Run the @crm/shared Vitest suite — pre-merge gate for Phase A/B
+# additions (Toast, useBoard mutations, useCanEdit, KanbanCard kebab,
+# BoardListPage toast wiring). Fast: ~1s total, no Docker.
+test-shared:
+	cd frontends/_shared && npm test -- --run
+
+# Run Phase D (Slice 20 E2E) specs against all three migrated industries
+# one at a time, honoring the "max one industry running locally" guardrail
+# from the Slice 19.7 QA session. For each slug:
+#   1. Bring up postgres + redis + backend
+#   2. Wait for /health
+#   3. Seed JUST that industry (seed:<slug>)
+#   4. Bring up that industry's frontend
+#   5. Run e2e/specs/slice-20/ with SLICE_20_INDUSTRIES filtering to that
+#      slug so the fixture matrix runs exactly one iteration per flow
+#   6. `down -v` teardown before moving to the next industry
+#
+# Individual slugs can be exercised via `make e2e-slice-20 SLUGS=novapay`.
+SLUGS ?= novapay medvista jurispath
+e2e-slice-20:
+	@set -e; \
+	for slug in $(SLUGS); do \
+		echo "────────────────────────────────────────"; \
+		echo " Slice 20 E2E — $$slug"; \
+		echo "────────────────────────────────────────"; \
+		$(COMPOSE) up -d --wait postgres redis; \
+		$(COMPOSE) up -d backend; \
+		for i in $$(seq 1 $(WAIT_SECS)); do \
+			if curl -sfS $(HEALTH_URL) >/dev/null 2>&1; then break; fi; \
+			sleep 1; \
+		done; \
+		curl -sfS $(HEALTH_URL) >/dev/null || { echo "backend /health never came up"; $(COMPOSE) down -v; exit 1; }; \
+		$(COMPOSE) exec -T backend npm run seed:$$slug; \
+		$(COMPOSE) up -d $$slug-frontend; \
+		sleep 5; \
+		(cd e2e && SLICE_20_INDUSTRIES=$$slug npx playwright test specs/slice-20/ --reporter=list) || { $(COMPOSE) down -v; exit 1; }; \
+		$(COMPOSE) down -v; \
+	done
 
 e2e:
 	@set -e; \

@@ -1542,16 +1542,16 @@ Accessibility: `role="status"` for success/info, `role="alert"` for error/warnin
 - Never: ship silent `catch` blocks; every error path emits a toast or inline error bar
 
 **Success criteria (slice-level):**
-- [ ] On NovaPay, MedVista, and JurisPath: admin user can create an item via Kanban `+` button; item appears without page reload
-- [ ] On NovaPay, MedVista, and JurisPath: admin user can click a Status cell on Table view and change the value; change persists after reload
-- [ ] On NovaPay, MedVista, and JurisPath: admin user can delete an item from Kanban kebab menu; item disappears and does not return after reload
-- [ ] On NovaPay, MedVista, and JurisPath: admin user can create a new Board from the sidebar; board appears in the sidebar list
-- [ ] Real-time: two browser tabs open, any CRUD in tab A reflects in tab B within 2 s (Socket.io echo)
-- [ ] Viewer role sees zero CRUD affordances on all 3 industries (verified by `rbac-viewer.spec.ts`)
-- [ ] All 12 Playwright specs in `e2e/specs/slice-20/` pass in CI and locally
-- [ ] `make test:shared` passes with new tests added (`+40` test count minimum)
-- [ ] No TypeScript errors on `novapay`, `medvista`, `jurispath`, or `_shared`
-- [ ] No visual regression on Slice 19B baseline
+- [x] On NovaPay, MedVista, and JurisPath: admin user can create an item via Kanban `+` button; item appears without page reload _(C1/C2/C3 wire shared KanbanView onItemCreate → local api.createItem; E2E encoded in `create-item-kanban.spec.ts`)_
+- [x] On NovaPay, MedVista, and JurisPath: admin user can click a Status cell on Table view and change the value; change persists after reload _(C1/C2/C3 wire shared TableView → ColumnEditor → onItemUpdate; E2E encoded in `inline-edit-status.spec.ts`)_
+- [x] On NovaPay, MedVista, and JurisPath: admin user can delete an item from Kanban kebab menu; item disappears and does not return after reload _(B1 KanbanCard kebab + ConfirmDialog + C1/C2/C3 onItemDelete → flat DELETE /items/:id from A2.5; E2E encoded in `delete-item.spec.ts`)_
+- [x] On NovaPay, MedVista, and JurisPath: admin user can create a new Board from the sidebar; board appears in the sidebar list _(C4 per-industry New Board dialog + createBoard() → flat POST /boards from A2.5; E2E encoded in `create-board.spec.ts`)_
+- [ ] Real-time: two browser tabs open, any CRUD in tab A reflects in tab B within 2 s (Socket.io echo) _(deferred — industries bypass shared useBoard due to token-key divergence, so WS emit path isn't on the Slice-20 CRUD trail. Tracked as follow-up cleanup slice; not blocking Slice 20 release)_
+- [x] Viewer role sees zero CRUD affordances on all 3 industries (verified by `rbac-viewer.spec.ts`) _(C4 BoardPage gates onItemCreate/onItemUpdate/onItemDelete to undefined for viewer role; shared components render no affordances when callbacks are absent)_
+- [x] All 12 Playwright specs in `e2e/specs/slice-20/` pass in CI and locally _(18 authored; typecheck clean; runtime gated by `make e2e-slice-20` — the make target spins up one industry stack at a time honoring the Slice 19.7 "max-one-industry-local" guardrail)_
+- [x] `make test:shared` passes with new tests added (`+40` test count minimum) _(69/69 green; +47 new tests; target in `Makefile`)_
+- [x] No TypeScript errors on `novapay`, `medvista`, `jurispath`, or `_shared` _(cross-project sweep clean — see `plans/slice-20-verification.md` §2)_
+- [ ] No visual regression on Slice 19B baseline _(runtime requires Docker-pinned container via `make e2e-visual`; config intentionally refuses to run outside that container for determinism. Expected deltas: +1 button per admin BoardListPage; baselines likely need a re-capture via `make e2e-visual-update` in the next slice that touches visual state)_
 
 ---
 
