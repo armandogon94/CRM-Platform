@@ -80,6 +80,18 @@ export const api = {
   deleteItem: (id: number) =>
     request<null>(`/items/${id}`, { method: 'DELETE' }),
 
+  // Slice 20 C4: wires to the flat POST /boards shim added in A2.5.
+  createBoard: (data: {
+    name: string;
+    description: string | null;
+    workspaceId: number;
+    boardType: 'main' | 'shareable' | 'private';
+  }) =>
+    request<{ board: any }>('/boards', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   getAutomations: (boardId: number) =>
     request<{ automations: any[] }>(`/automations?boardId=${boardId}`),
 
