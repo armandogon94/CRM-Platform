@@ -3,7 +3,7 @@ import { useAuth } from './context/AuthContext';
 import { LoginPage } from './components/LoginPage';
 import { Sidebar } from './components/Sidebar';
 import { BoardPage } from './components/BoardPage';
-import { OverviewDashboard } from './components/OverviewDashboard';
+import { BoardListPage } from './components/BoardListPage';
 import { AutomationsPanel } from './components/AutomationsPanel';
 import { api } from './utils/api';
 import type { Board, Item, Automation } from './types';
@@ -45,14 +45,18 @@ function AppContent() {
     }
   }, [currentBoard?.id]);
 
+  const refreshBoards = useCallback(async () => {
+    if (!user?.workspaceId) return;
+    const res = await api.getBoards(user.workspaceId);
+    if (res.success && res.data) {
+      setBoards(res.data.boards || res.data as any || []);
+    }
+  }, [user?.workspaceId]);
+
   useEffect(() => {
     if (!user?.workspaceId) return;
-    api.getBoards(user.workspaceId).then((res) => {
-      if (res.success && res.data) {
-        setBoards(res.data.boards || res.data as any || []);
-      }
-    });
-  }, [user?.workspaceId]);
+    refreshBoards();
+  }, [user?.workspaceId, refreshBoards]);
 
   useEffect(() => {
     if (boards.length === 0) return;
@@ -115,7 +119,13 @@ function AppContent() {
 
   const renderContent = () => {
     if (activeView === 'overview') {
-      return <OverviewDashboard boards={boards} allItems={allItems} />;
+      return (
+        <BoardListPage
+          boards={boards}
+          allItems={allItems}
+          onBoardsRefresh={refreshBoards}
+        />
+      );
     }
     if (activeView === 'automations') {
       return (
