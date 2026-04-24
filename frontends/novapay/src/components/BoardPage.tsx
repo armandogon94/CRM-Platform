@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { Table, LayoutGrid, Search, Filter } from 'lucide-react';
 import { BoardView } from '@crm/shared/components/board/BoardView';
 import { useToast } from '@crm/shared/components/common/ToastProvider';
+import { useAuth } from '../context/AuthContext';
 import { api } from '../utils/api';
 import type { Board, Item, BoardView as BoardViewType } from '../types';
 
@@ -30,6 +31,16 @@ export function BoardPage() {
   const { id } = useParams<{ id: string }>();
   const boardId = id ? parseInt(id, 10) : NaN;
   const { show: showToast } = useToast();
+  const { user } = useAuth();
+
+  // RBAC gating (Slice 20 C4): viewer role sees zero CRUD affordances.
+  // admin + member get create/edit/delete on items — the shared
+  // BoardView only renders the affordances when the callback props
+  // are defined, so setting them to undefined hides the buttons.
+  // Passing the full callback set for admin/member matches the Slice
+  // 20 RBAC matrix (member's "no board create" is gated inside
+  // BoardListPage; per-item CRUD is open).
+  const canItemCrud = user?.role === 'admin' || user?.role === 'member';
 
   const [board, setBoard] = useState<Board | null>(null);
   const [items, setItems] = useState<Item[]>([]);
@@ -242,9 +253,9 @@ export function BoardPage() {
           board={board as unknown as Parameters<typeof BoardView>[0]['board']}
           items={filteredItems as unknown as Parameters<typeof BoardView>[0]['items']}
           currentView={currentView as unknown as Parameters<typeof BoardView>[0]['currentView']}
-          onItemCreate={handleItemCreate}
-          onItemUpdate={handleItemUpdate}
-          onItemDelete={handleItemDelete}
+          onItemCreate={canItemCrud ? handleItemCreate : undefined}
+          onItemUpdate={canItemCrud ? handleItemUpdate : undefined}
+          onItemDelete={canItemCrud ? handleItemDelete : undefined}
         />
       </div>
 

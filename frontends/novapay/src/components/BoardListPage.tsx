@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Table, LayoutGrid, Users } from 'lucide-react';
+import { Plus, Table, LayoutGrid, Users, X } from 'lucide-react';
+import { useToast } from '@crm/shared/components/common/ToastProvider';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../utils/api';
 import type { Board } from '../types';
 
 /**
- * NovaPay router-based landing for /boards (Slice 19.6 migration).
+ * NovaPay router-based landing for /boards (Slice 19.6 migration +
+ * Slice 20 C4 New-Board dialog + RBAC gating).
  *
  * DOM contract required by Slice 19 D1 spec:
  *   - h1 "Boards"
@@ -14,17 +16,49 @@ import type { Board } from '../types';
  *     the board's name (e.g. "Transaction Pipeline")
  *   - Click navigates to /boards/:id via react-router `useNavigate`
  *
+ * Slice 20 C4 additions:
+ *   - "+ New Board" button in the top-right (admin + manager only;
+ *     viewer + member get no create affordance per the RBAC matrix
+ *     — member's no-create-board is a product decision, not a
+ *     security one).
+ *   - Modal dialog with name/description form; POSTs via the flat
+ *     /boards shim (A2.5) through NovaPay's local api, surfacing
+ *     errors via the shared Toast provider (never silent catch).
+ *
  * The richer OverviewDashboard still exists at /overview for the
  * NovaPay-specific KPI view; /boards is the universal entry point.
  */
 export function BoardListPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { show: showToast } = useToast();
   const [boards, setBoards] = useState<Board[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  // Create-dialog state.
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [newBoardName, setNewBoardName] = useState('');
+  const [newBoardDescription, setNewBoardDescription] = useState('');
+  const [creating, setCreating] = useState(false);
+
+  // RBAC: only admin sees "New Board" per SPEC §Slice 20 RBAC matrix.
+  // manager doesn't exist as a real role (see A4 reconciliation note);
+  // member is explicitly NOT given board-create per the product call.
+  const canCreateBoard = user?.role === 'admin';
+
+  const refreshBoards = async () => {
     if (!user?.workspaceId) return;
+    const res = await api.getBoards(user.workspaceId);
+    if (res.success && res.data) {
+      setBoards(res.data.boards || []);
+    }
+  };
+
+  useEffect(() => {
+    if (!user?.workspaceId) {
+      setLoading(false);
+      return;
+    }
     api.getBoards(user.workspaceId).then((res) => {
       if (res.success && res.data) {
         setBoards(res.data.boards || []);
@@ -32,6 +66,41 @@ export function BoardListPage() {
       setLoading(false);
     });
   }, [user?.workspaceId]);
+
+  const handleCreateBoard = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBoardName.trim() || !user?.workspaceId) return;
+
+    setCreating(true);
+    try {
+      const res = await api.createBoard({
+        name: newBoardName.trim(),
+        description: newBoardDescription.trim() || null,
+        workspaceId: user.workspaceId,
+        boardType: 'main',
+      });
+      if (res.success) {
+        setNewBoardName('');
+        setNewBoardDescription('');
+        setShowCreateDialog(false);
+        await refreshBoards();
+      } else {
+        showToast({
+          variant: 'error',
+          title: 'Could not create board',
+          description: res.error ?? 'Please try again.',
+        });
+      }
+    } catch (err) {
+      showToast({
+        variant: 'error',
+        title: 'Could not create board',
+        description: err instanceof Error ? err.message : 'Network error.',
+      });
+    } finally {
+      setCreating(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -43,11 +112,22 @@ export function BoardListPage() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900">Boards</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Manage and organize your work across NovaPay boards
-        </p>
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Boards</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Manage and organize your work across NovaPay boards
+          </p>
+        </div>
+        {canCreateBoard && (
+          <button
+            onClick={() => setShowCreateDialog(true)}
+            className="bg-brand-600 text-white font-medium px-4 py-2 rounded-lg transition-opacity flex items-center gap-2 hover:opacity-90"
+          >
+            <Plus size={18} />
+            New Board
+          </button>
+        )}
       </div>
 
       {boards.length === 0 ? (
@@ -104,6 +184,86 @@ export function BoardListPage() {
               </div>
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Create-board dialog. Role-gated open: only admin can reach this
+          via the trigger button above, but the render is cheap and keeps
+          the component simple. */}
+      {showCreateDialog && canCreateBoard && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between p-6 border-b border-gray-100">
+              <h3 className="text-lg font-semibold text-gray-900">
+                Create New Board
+              </h3>
+              <button
+                onClick={() => setShowCreateDialog(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+                aria-label="Close"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateBoard} className="p-6 space-y-4">
+              <div>
+                <label
+                  htmlFor="novapay-new-board-name"
+                  className="block text-sm font-medium text-gray-700 mb-1.5"
+                >
+                  Board Name
+                </label>
+                <input
+                  id="novapay-new-board-name"
+                  type="text"
+                  value={newBoardName}
+                  onChange={(e) => setNewBoardName(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-colors"
+                  placeholder="e.g., Sales Pipeline"
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="novapay-new-board-description"
+                  className="block text-sm font-medium text-gray-700 mb-1.5"
+                >
+                  Description (optional)
+                </label>
+                <textarea
+                  id="novapay-new-board-description"
+                  value={newBoardDescription}
+                  onChange={(e) => setNewBoardDescription(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-colors resize-none"
+                  placeholder="What is this board for?"
+                  rows={3}
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateDialog(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creating || !newBoardName.trim()}
+                  className="px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-lg transition-opacity disabled:opacity-50 flex items-center gap-2 hover:opacity-90"
+                >
+                  {creating && (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  )}
+                  Create Board
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
