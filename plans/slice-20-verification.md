@@ -191,3 +191,144 @@ Phase D — E2E specs:
 ---
 
 **Verdict:** Slice 20 code is ready to ship pending E2 (visual regression) + E3 (Make targets + SPEC tickbox). The two unresolved success criteria (real-time echo, visual regression) are tracked and non-blocking for a Slice 20 release; the real-time gap is a follow-up slice, visual regression is the next 10 minutes.
+
+---
+
+# Slice 20B — Fanout Verification Addendum
+
+**Slice:** 20B — CRUD UI fanout to remaining 7 industries + dead-code cleanup
+**Plan:** `plans/slice-20b-plan.md`
+**Verified:** 2026-04-23 (post-fanout)
+
+## Final state — all 10 industries CRUD-wired
+
+| # | Industry | Port | Brand | C0 | C2 | C4 | B2 cleanup | Bundle (gz) |
+|---|----------|------|-------|----|----|----|----|-------------|
+| 1 | NovaPay | 13001 | #2563EB | (Slice 20A) | (Slice 20A) | (Slice 20A) | `8939e56` | 863 KB |
+| 2 | MedVista | 13002 | #059669 | (Slice 20A) | (Slice 20A) | (Slice 20A) | `67ae2ad` | 839 KB |
+| 3 | TrustGuard | 13003 | #1E3A5F | `98eb389` | (in `6fecfc6`*) | `742b244` | `8a28d3d` | 840 KB |
+| 4 | UrbanNest | 13004 | #D97706 | `1e27ac0` | `bcb492c`** + `a87b2d4` | `d75b5c7` | `d3fa8ba` | 839 KB |
+| 5 | SwiftRoute | 13005 | #7C3AED | `11b3038` | `50460c5` | (in `d9ef066`*) | `5827f43` | 839 KB |
+| 6 | DentaFlow | 13006 | #06B6D4 | (in `11b3038`*) | (in `d75b5c7`*) | `821b35d` | `e23cc16` | 839 KB |
+| 7 | JurisPath | 13007 | #166534 | (Slice 20A) | (Slice 20A) | (Slice 20A) | `160ecb5` | 839 KB |
+| 8 | TableSync | 13008 | #9F1239 | `3f7a9e5` | `11d73a9` | (in `d9ef066`*) | `d168c73` | 839 KB |
+| 9 | CraneStack | 13009 | #EA580C | `5d6f425` | `8d16982`* | `059596f`* | `8ffe5b9` | 841 KB |
+| 10 | EduPulse | 13010 | #6D28D9 | `6fecfc6`* | `56552d1` | `630d580` | `f8234b1` | 839 KB |
+
+\* — commit message label is mismatched relative to its content due to multi-worktree git-index race condition (see §"Parallel-agent collisions" below). The actual file content per industry is correct and verified by `tsc --noEmit` + `npm run build`.
+
+\*\* — `bcb492c` was lost during a concurrent rebase; `a87b2d4` is the recovery commit that re-landed the missing UrbanNest ToastProvider mount.
+
+## Phase B1 — fixture + Make target
+
+- `e2e/fixtures/slice-20-industries.ts` — expanded `SLICE_20_INDUSTRIES` from 3 to 10 entries in port order. `selectedIndustries()` env-var filter unchanged.
+- `Makefile` — `e2e-slice-20` SLUGS default expanded from `novapay medvista jurispath` → all 10 in port order. Single-industry override (`make e2e-slice-20 SLUGS=trustguard`) still works.
+- Commit: `8801116 feat(slice-20b): expand fixture matrix + Make target SLUGS to all 10 industries (B1)`
+- `cd e2e && npx tsc --noEmit` clean.
+
+## Phase B2 — dead-code cleanup
+
+10 atomic commits (port-ordered) removed 30 dead files (3 per industry × 10):
+- `frontends/<industry>/src/components/KanbanView.tsx` — DELETED
+- `frontends/<industry>/src/components/BoardTable.tsx` — DELETED
+- `frontends/<industry>/src/components/StatusBadge.tsx` — DELETED
+
+Each industry's commit verified via `tsc --noEmit` clean before staging.
+
+| Industry | Cleanup commit | Files deleted |
+|----------|----------------|---------------|
+| novapay | `8939e56` | 3 |
+| medvista | `67ae2ad` | 3 |
+| trustguard | `8a28d3d` | 3 |
+| urbannest | `d3fa8ba` | 3 |
+| swiftroute | `5827f43` | 3 |
+| dentaflow | `e23cc16` | 3 |
+| jurispath | `160ecb5` | 3 |
+| tablesync | `d168c73` | 3 |
+| cranestack | `8ffe5b9` | 3 |
+| edupulse | `f8234b1` | 3 |
+| **Total** | | **30** |
+
+Risk-1 (StatusBadge still in use) was a real candidate but the audit confirmed StatusBadge was only imported from KanbanView/BoardTable themselves — circular reference between the dead trio. Once those two were unimported by BoardPage migration, all three were genuinely dead. Risk-2 (visual baseline dependency) was theoretical and proved zero — deleting unimported files cannot change rendered output.
+
+## Test sweep (post-cleanup)
+
+| Surface | Result |
+|---------|--------|
+| `@crm/shared` tests | **69/69 pass** (no regression vs Slice 20A) |
+| All 10 industries `npx tsc --noEmit` | All clean |
+| All 10 industries `npm run build` | All succeed (~839–863 KB JS bundle) |
+
+## Parallel-agent collisions (incident learning)
+
+Phase B0 dispatched 7 worktree-isolated subagents. Despite worktree isolation at the file-tree level, they shared the underlying git index because the worktrees were registered against the SAME repo. Three side effects:
+
+1. **Mislabeled commits** — at least 5 commits carry an industry label that doesn't match their primary content. Examples:
+   - `6fecfc6 feat(cranestack): wire @crm/shared...` actually contains EduPulse C0 + TrustGuard C2 file diffs
+   - `d9ef066 feat(trustguard): New Board dialog...` contains SwiftRoute + TableSync C4 diffs
+   - `8d16982` and `059596f` are titled `feat(dentaflow)` but contain CraneStack content
+2. **Lost-then-recovered commit** — UrbanNest's C2 (`bcb492c`) was pruned by a concurrent rebase; `a87b2d4` was a recovery commit to re-land the missing ToastProvider mount.
+3. **Cross-industry file pollution** — some commits carry files from 2 industries because both agents ran `git add .` against the shared index simultaneously.
+
+**Mitigations applied this slice:**
+- Final file-content audit (per-industry grep for required strings: `@crm/shared` dep, `ToastProvider` mount, `deleteItem`, `createBoard`, shared `BoardView` import, "New Board" UI) — all 10 industries pass.
+- Per-industry `tsc --noEmit` + `npm run build` clean — proves contents are functionally correct regardless of commit-label assignment.
+
+**For future slices:** dispatch agents one-at-a-time when shared-tree race is possible, OR enforce true worktree isolation via `git worktree add` to a fully separate working directory per agent. The current `isolation: "worktree"` mode shares the underlying git index — usable for low-collision parallelism but unsafe when ≥3 agents commit against the same parent branch simultaneously.
+
+## Open follow-ups (carried over from Slice 20A)
+
+| Item | Status | Note |
+|------|--------|------|
+| Real-time WS echo on Slice 20 CRUD path | Open | Token-key unification still required across 10 industries |
+| Visual regression baseline re-capture | Open | Now includes the 7 new industries' New Board buttons; needs Docker-pinned `make e2e-visual-update` run |
+| `make e2e-slice-20` runtime verification | Open | Make target now defaults to all 10; needs an actual run with Docker stack |
+
+## Slice 20B commit inventory
+
+23 commits on `main` for Slice 20B:
+
+```
+Plan:
+  abc5fcf docs(plan): Slice 20B fanout plan + B2 dead-code cleanup phase
+
+Phase B0 — per-industry fanout (parallel × 7, with race contamination):
+  98eb389 trustguard C0 (clean)
+  1e27ac0 urbannest C0 (clean)
+  11b3038 swiftroute C0 (carries dentaflow C0 too — race)
+  6fecfc6 (mislabeled) — actually edupulse C0 + trustguard C2 — race
+  5d6f425 cranestack C0 (clean)
+  3f7a9e5 tablesync C0 (landed last, post-rebase recovery)
+  bcb492c (LOST during rebase, replaced by a87b2d4 recovery)
+  a87b2d4 urbannest main.tsx ToastProvider recovery
+  50460c5 swiftroute C2 (clean)
+  56552d1 edupulse C2 (clean)
+  11d73a9 tablesync C2 (clean)
+  8d16982 (mislabeled) — cranestack C2
+  d75b5c7 (mislabeled) — urbannest C4 + dentaflow C2 — race
+  742b244 trustguard C4 (clean)
+  d9ef066 (mislabeled) — swiftroute + tablesync C4 — race
+  059596f (mislabeled) — cranestack C4
+  821b35d dentaflow C4 (clean)
+  630d580 edupulse C4 (clean)
+  f9c27b0 dentaflow (final consolidation)
+
+Phase B1 — fixture matrix + make target:
+  8801116 feat(slice-20b): expand fixture matrix + Make target SLUGS to all 10 industries (B1)
+
+Phase B2 — dead-code cleanup (clean, port-ordered):
+  8939e56 chore(novapay): remove unreferenced forked board components
+  67ae2ad chore(medvista): same
+  8a28d3d chore(trustguard): same
+  d3fa8ba chore(urbannest): same
+  5827f43 chore(swiftroute): same
+  e23cc16 chore(dentaflow): same
+  160ecb5 chore(jurispath): same
+  d168c73 chore(tablesync): same
+  8ffe5b9 chore(cranestack): same
+  f8234b1 chore(edupulse): same
+```
+
+---
+
+**Verdict:** Slice 20B file-state is correct and verified across all 10 industries. The commit graph carries some race-induced label mismatches that are documented above for posterity but do not affect functional correctness. Future cleanup options: rewrite history to fix labels (risky — main is shared), or accept the chaos and move on (recommended — `git log` still shows complete coverage by industry, just with some labels needing footnotes).
