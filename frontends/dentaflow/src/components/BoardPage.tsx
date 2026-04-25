@@ -1,126 +1,49 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Table, LayoutGrid, Search, Filter } from 'lucide-react';
 import { BoardView } from '@crm/shared/components/board/BoardView';
-import { useToast } from '@crm/shared/components/common/ToastProvider';
+import { useBoard } from '@crm/shared/hooks/useBoard';
 import { useAuth } from '../context/AuthContext';
-import { api } from '../utils/api';
-import type { Board, Item, BoardView as BoardViewType } from '../types';
+import type { BoardView as BoardViewType } from '../types';
 
 interface BoardPageProps {
-  board: Board | null;
-  items: Item[];
-  loading: boolean;
+  boardId: number;
 }
 
 /**
- * DentaFlow state-based board page (Slice 20B C2 CRUD wiring).
+ * DentaFlow board page (Slice 20.5 B — shared useBoard adoption).
  *
- * Unlike NovaPay (router-based), DentaFlow's parent App.tsx drives board
- * selection via `activeView` state and passes `board` + `items` down as
- * props. This component mirrors them into local state so we can apply
- * optimistic CRUD updates without threading setters through App.
+ * Phase B drops the props-mirror + local CRUD handlers from C2 in favour
+ * of the shared useBoard hook. useBoard owns:
+ *   - board + items fetch (REST GET /boards/:id and /boards/:id/items)
+ *   - WebSocket subscription with token-keyed auth (configured at boot
+ *     in main.tsx via configureWebSocket)
+ *   - createItem / updateItemValue / deleteItem mutations with
+ *     optimistic updates, rollback, and toast-on-error
  *
- * C2 migrates from DentaFlow's local KanbanView/BoardTable fork to the
- * shared BoardView. Three CRUD callbacks are wired through to the
- * DentaFlow-local REST client (which uses the `dentaflow_token` key
- * convention — we keep the local api rather than shared useBoard for
- * the same reason MedVista did in Slice 20A C2).
+ * AppContent now passes boardId (parsed from activeView) instead of
+ * threading board/items/loading state. The local socket listeners and
+ * loadBoard callback in App.tsx have been removed — useBoard's internal
+ * useWebSocket handles room joining and live echoes for both tabs.
  *
- *   - onItemCreate → POST /items (backend assigns groupId)
- *   - onItemUpdate → PUT /items/:id/values (optimistic + rollback)
- *   - onItemDelete → DELETE /items/:id (A2.5 flat shim, optimistic + rollback)
- *
- * Every failure emits a toast via the shared <ToastProvider>.
+ * RBAC gating (Slice 20B C4): viewer role sees zero CRUD affordances.
+ * admin + member get full CRUD by passing the useBoard mutation
+ * callbacks; viewer passes undefined, which hides the buttons.
  */
-export function BoardPage({ board, items: propItems, loading }: BoardPageProps) {
+export function BoardPage({ boardId }: BoardPageProps) {
   const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table');
   const [searchQuery, setSearchQuery] = useState('');
-  const [items, setItems] = useState<Item[]>(propItems);
-  const { show: showToast } = useToast();
   const { user } = useAuth();
 
-  // RBAC gating (Slice 20B C4): viewer role sees zero CRUD affordances.
-  // admin + member get create/edit/delete on items — the shared
-  // BoardView only renders the affordances when the callback props
-  // are defined, so setting them to undefined hides the buttons.
-  // Passing the full callback set for admin/member matches the Slice
-  // 20 RBAC matrix (member's "no board create" is gated inside
-  // OverviewDashboard's create-board trigger, not here).
+  const {
+    board,
+    items,
+    loading,
+    createItem,
+    updateItemValue,
+    deleteItem,
+  } = useBoard(boardId);
+
   const canItemCrud = user?.role === 'admin' || user?.role === 'member';
-
-  // Sync from parent when the selected board changes (App re-fetches).
-  useEffect(() => {
-    setItems(propItems);
-  }, [propItems]);
-
-  // ── CRUD handlers threaded to <BoardView> ──────────────────────────
-  const handleItemCreate = useCallback(
-    async (groupId: number, name: string) => {
-      if (!board) return;
-      const res = await api.createItem({ boardId: board.id, groupId, name });
-      if (res.success && res.data?.item) {
-        setItems((prev) => [...prev, res.data!.item as Item]);
-      } else {
-        showToast({
-          variant: 'error',
-          title: 'Could not create item',
-          description: res.error ?? 'Please try again.',
-        });
-      }
-    },
-    [board, showToast]
-  );
-
-  const handleItemUpdate = useCallback(
-    async (itemId: number, columnId: number, value: unknown) => {
-      // Optimistic update — write locally, roll back on error.
-      const snapshot = items;
-      setItems((prev) =>
-        prev.map((it) => {
-          if (it.id !== itemId) return it;
-          const cvs = it.columnValues ?? [];
-          const idx = cvs.findIndex((c) => c.columnId === columnId);
-          const nextCvs =
-            idx >= 0
-              ? cvs.map((c) =>
-                  c.columnId === columnId ? { ...c, value } : c
-                )
-              : [
-                  ...cvs,
-                  { id: -1, itemId, columnId, value } as (typeof cvs)[number],
-                ];
-          return { ...it, columnValues: nextCvs };
-        })
-      );
-      const res = await api.updateColumnValues(itemId, [{ columnId, value }]);
-      if (!res.success) {
-        setItems(snapshot);
-        showToast({
-          variant: 'error',
-          title: 'Could not update value',
-          description: res.error ?? 'Please try again.',
-        });
-      }
-    },
-    [items, showToast]
-  );
-
-  const handleItemDelete = useCallback(
-    async (itemId: number) => {
-      const snapshot = items;
-      setItems((prev) => prev.filter((i) => i.id !== itemId));
-      const res = await api.deleteItem(itemId);
-      if (!res.success) {
-        setItems(snapshot);
-        showToast({
-          variant: 'error',
-          title: 'Could not delete item',
-          description: res.error ?? 'Please try again.',
-        });
-      }
-    },
-    [items, showToast]
-  );
 
   // Shared BoardView expects a `currentView: BoardView` prop matching the
   // selected UI mode — synthesise one from local viewMode state rather
@@ -158,6 +81,15 @@ export function BoardPage({ board, items: propItems, loading }: BoardPageProps) 
         item.name.toLowerCase().includes(searchQuery.toLowerCase())
       )
     : items;
+
+  // Adapter callbacks: BoardView passes (groupId, name) for create and
+  // (itemId, columnId, value) for update — useBoard's createItem takes
+  // an object input, so wrap the positional args here.
+  const handleItemCreate = canItemCrud
+    ? (groupId: number, name: string) => createItem({ groupId, name })
+    : undefined;
+  const handleItemUpdate = canItemCrud ? updateItemValue : undefined;
+  const handleItemDelete = canItemCrud ? deleteItem : undefined;
 
   return (
     <div className="space-y-4">
@@ -219,17 +151,17 @@ export function BoardPage({ board, items: propItems, loading }: BoardPageProps) 
         </div>
       </div>
 
-      {/* Board Content — Slice 20B C2 uses shared BoardView so CRUD
-          affordances (inline + Add item / kebab delete / inline edit)
-          are consistent with every industry migration. */}
+      {/* Board Content — shared BoardView with useBoard mutations.
+          Real-time WS echo now works: a second tab observes mutations
+          within ~2s via useBoard's internal useWebSocket subscription. */}
       <div className="card p-4">
         <BoardView
           board={board as unknown as Parameters<typeof BoardView>[0]['board']}
           items={filteredItems as unknown as Parameters<typeof BoardView>[0]['items']}
           currentView={currentView as unknown as Parameters<typeof BoardView>[0]['currentView']}
-          onItemCreate={canItemCrud ? handleItemCreate : undefined}
-          onItemUpdate={canItemCrud ? handleItemUpdate : undefined}
-          onItemDelete={canItemCrud ? handleItemDelete : undefined}
+          onItemCreate={handleItemCreate}
+          onItemUpdate={handleItemUpdate}
+          onItemDelete={handleItemDelete}
         />
       </div>
 
