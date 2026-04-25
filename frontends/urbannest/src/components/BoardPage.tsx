@@ -1,125 +1,65 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Table, LayoutGrid, Search, Filter } from 'lucide-react';
 import { BoardView } from '@crm/shared/components/board/BoardView';
-import { useToast } from '@crm/shared/components/common/ToastProvider';
+import { useBoard } from '@crm/shared/hooks/useBoard';
 import { useAuth } from '../context/AuthContext';
-import { api } from '../utils/api';
-import type { Board, Item, BoardView as BoardViewType } from '../types';
+import type { BoardView as BoardViewType } from '../types';
 
 interface BoardPageProps {
-  board: Board | null;
-  items: Item[];
-  loading: boolean;
+  /**
+   * Slice 20.5 B: parent App.tsx now passes the selected board's id
+   * (parsed from the activeView state key) rather than threading
+   * board/items/loading down. The shared useBoard hook owns fetching,
+   * WebSocket subscription, and CRUD mutations.
+   */
+  boardId: number;
 }
 
 /**
- * UrbanNest state-based board page (Slice 20B C2 CRUD wiring).
+ * UrbanNest state-based board page (Slice 20.5 B — useBoard adoption).
  *
- * Like MedVista (router-less), UrbanNest's parent App.tsx drives board
- * selection via `activeView` state and passes `board` + `items` down as
- * props. This component mirrors them into local state so we can apply
- * optimistic CRUD updates without threading setters through App.
+ * Pre-20.5 this component received `board`, `items`, and `loading` as
+ * props from App.tsx, mirrored items into local state, and defined its
+ * own optimistic CRUD handlers against a UrbanNest-local REST client.
  *
- * C2 migrates from UrbanNest's local KanbanView/BoardTable fork to the
- * shared BoardView. Three CRUD callbacks are wired through to the
- * UrbanNest-local REST client (which uses the `urbannest_token` key
- * convention — we keep the local api rather than shared useBoard for
- * the same reason MedVista did in C2).
+ * Post-20.5 the shared `useBoard(boardId)` hook owns:
+ *   - Initial board + items fetch
+ *   - WebSocket subscription (item:created/updated/deleted, column:value)
+ *   - createItem / updateItemValue / deleteItem mutations with
+ *     optimistic updates, rollback on error, and toast-on-failure
  *
- *   - onItemCreate → POST /items (backend assigns groupId)
- *   - onItemUpdate → PUT /items/:id/values (optimistic + rollback)
- *   - onItemDelete → DELETE /items/:id (A2.5 flat shim, optimistic + rollback)
- *
- * Every failure emits a toast via the shared <ToastProvider>.
+ * What stays UrbanNest-specific:
+ *   - Local `viewMode` toggle (table | kanban) → synthesised currentView
+ *   - Client-side `searchQuery` filter (server-side search is a Slice 21+
+ *     concern — keeping the existing UX behaviour)
+ *   - Role-gated CRUD via canItemCrud (admin + member only)
+ *   - Branded loading/empty states
  */
-export function BoardPage({ board, items: propItems, loading }: BoardPageProps) {
+export function BoardPage({ boardId }: BoardPageProps) {
   const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table');
   const [searchQuery, setSearchQuery] = useState('');
-  const [items, setItems] = useState<Item[]>(propItems);
-  const { show: showToast } = useToast();
   const { user } = useAuth();
+
+  // Shared hook: fetch + realtime + mutations. Authentication uses the
+  // urbannest_token key configured at app boot in main.tsx.
+  const { board, items, loading, createItem, updateItemValue, deleteItem } =
+    useBoard(boardId);
 
   // RBAC gating (Slice 20B C4): viewer role sees zero CRUD affordances.
   // admin + member get create/edit/delete on items — the shared
   // BoardView only renders the affordances when the callback props
-  // are defined, so setting them to undefined hides the buttons.
-  // Passing the full callback set for admin/member matches the Slice
-  // 20 RBAC matrix (member's "no board create" is gated inside
-  // OverviewDashboard's create-board trigger, not here).
+  // are defined, so passing undefined hides the buttons.
   const canItemCrud = user?.role === 'admin' || user?.role === 'member';
 
-  // Sync from parent when the selected board changes (App re-fetches).
-  useEffect(() => {
-    setItems(propItems);
-  }, [propItems]);
-
-  // ── CRUD handlers threaded to <BoardView> ──────────────────────────
-  const handleItemCreate = useCallback(
-    async (groupId: number, name: string) => {
-      if (!board) return;
-      const res = await api.createItem({ boardId: board.id, groupId, name });
-      if (res.success && res.data?.item) {
-        setItems((prev) => [...prev, res.data!.item as Item]);
-      } else {
-        showToast({
-          variant: 'error',
-          title: 'Could not create item',
-          description: res.error ?? 'Please try again.',
-        });
-      }
+  // BoardView's onItemCreate prop signature is (groupId, name) — adapt
+  // it to useBoard.createItem's CreateItemMutationInput shape. Stable
+  // ref via useCallback so BoardView's memoised lane components don't
+  // re-render on every parent render.
+  const handleCreateItem = useCallback(
+    (groupId: number, name: string) => {
+      void createItem({ groupId, name });
     },
-    [board, showToast]
-  );
-
-  const handleItemUpdate = useCallback(
-    async (itemId: number, columnId: number, value: unknown) => {
-      // Optimistic update — write locally, roll back on error.
-      const snapshot = items;
-      setItems((prev) =>
-        prev.map((it) => {
-          if (it.id !== itemId) return it;
-          const cvs = it.columnValues ?? [];
-          const idx = cvs.findIndex((c) => c.columnId === columnId);
-          const nextCvs =
-            idx >= 0
-              ? cvs.map((c) =>
-                  c.columnId === columnId ? { ...c, value } : c
-                )
-              : [
-                  ...cvs,
-                  { id: -1, itemId, columnId, value } as (typeof cvs)[number],
-                ];
-          return { ...it, columnValues: nextCvs };
-        })
-      );
-      const res = await api.updateColumnValues(itemId, [{ columnId, value }]);
-      if (!res.success) {
-        setItems(snapshot);
-        showToast({
-          variant: 'error',
-          title: 'Could not update value',
-          description: res.error ?? 'Please try again.',
-        });
-      }
-    },
-    [items, showToast]
-  );
-
-  const handleItemDelete = useCallback(
-    async (itemId: number) => {
-      const snapshot = items;
-      setItems((prev) => prev.filter((i) => i.id !== itemId));
-      const res = await api.deleteItem(itemId);
-      if (!res.success) {
-        setItems(snapshot);
-        showToast({
-          variant: 'error',
-          title: 'Could not delete item',
-          description: res.error ?? 'Please try again.',
-        });
-      }
-    },
-    [items, showToast]
+    [createItem]
   );
 
   // Shared BoardView expects a `currentView: BoardView` prop matching the
@@ -219,17 +159,17 @@ export function BoardPage({ board, items: propItems, loading }: BoardPageProps) 
         </div>
       </div>
 
-      {/* Board Content — Slice 20B C2 uses shared BoardView so CRUD
-          affordances (inline + Add item / kebab delete / inline edit)
-          are consistent with every industry migration. */}
+      {/* Board Content — useBoard mutations are wired through the shared
+          BoardView so CRUD affordances (inline + Add item / kebab delete /
+          inline edit) are consistent with every industry migration. */}
       <div className="card p-4">
         <BoardView
           board={board as unknown as Parameters<typeof BoardView>[0]['board']}
           items={filteredItems as unknown as Parameters<typeof BoardView>[0]['items']}
           currentView={currentView as unknown as Parameters<typeof BoardView>[0]['currentView']}
-          onItemCreate={canItemCrud ? handleItemCreate : undefined}
-          onItemUpdate={canItemCrud ? handleItemUpdate : undefined}
-          onItemDelete={canItemCrud ? handleItemDelete : undefined}
+          onItemCreate={canItemCrud ? handleCreateItem : undefined}
+          onItemUpdate={canItemCrud ? updateItemValue : undefined}
+          onItemDelete={canItemCrud ? deleteItem : undefined}
         />
       </div>
 
