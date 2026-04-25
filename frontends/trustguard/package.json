@@ -9,6 +9,7 @@
     "preview": "vite preview --port 13003"
   },
   "dependencies": {
+    "@crm/shared": "file:../_shared",
     "lucide-react": "^0.453.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
