@@ -1,9 +1,18 @@
-import { Users, BookOpen, ClipboardCheck, TrendingUp, GraduationCap, AlertTriangle } from 'lucide-react';
+import { useState } from 'react';
+import { Users, BookOpen, ClipboardCheck, TrendingUp, GraduationCap, Plus, X } from 'lucide-react';
+import { useToast } from '@crm/shared/components/common/ToastProvider';
+import { useAuth } from '../context/AuthContext';
+import { api } from '../utils/api';
 import type { Board, Item, ColumnValue } from '../types';
 
 interface OverviewDashboardProps {
   boards: Board[];
   allItems: Record<number, Item[]>;
+  /**
+   * Slice 20B C4: parent App refetches its `boards` state on success so
+   * the newly-created board immediately appears in the sidebar + KPIs.
+   */
+  onBoardCreated?: () => void;
 }
 
 function countByStatus(items: Item[], statusColumnId: number | undefined, label: string): number {
@@ -39,7 +48,56 @@ function StatCard({ icon: Icon, label, value, color }: {
   );
 }
 
-export function OverviewDashboard({ boards, allItems }: OverviewDashboardProps) {
+export function OverviewDashboard({ boards, allItems, onBoardCreated }: OverviewDashboardProps) {
+  const { user } = useAuth();
+  const { show: showToast } = useToast();
+
+  // Slice 20B C4: RBAC — only admin sees "New Board" per the RBAC matrix.
+  // member + viewer get no create affordance (member's no-create-board is
+  // a product decision, mirroring NovaPay/MedVista C4).
+  const canCreateBoard = user?.role === 'admin';
+
+  // Create-dialog state.
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [newBoardName, setNewBoardName] = useState('');
+  const [newBoardDescription, setNewBoardDescription] = useState('');
+  const [creating, setCreating] = useState(false);
+
+  const handleCreateBoard = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBoardName.trim() || !user?.workspaceId) return;
+
+    setCreating(true);
+    try {
+      const res = await api.createBoard({
+        name: newBoardName.trim(),
+        description: newBoardDescription.trim() || null,
+        workspaceId: user.workspaceId,
+        boardType: 'main',
+      });
+      if (res.success) {
+        setNewBoardName('');
+        setNewBoardDescription('');
+        setShowCreateDialog(false);
+        onBoardCreated?.();
+      } else {
+        showToast({
+          variant: 'error',
+          title: 'Could not create board',
+          description: res.error ?? 'Please try again.',
+        });
+      }
+    } catch (err) {
+      showToast({
+        variant: 'error',
+        title: 'Could not create board',
+        description: err instanceof Error ? err.message : 'Network error.',
+      });
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const enrollmentBoard = boards.find((b) => b.name === 'Student Enrollment');
   const courseBoard = boards.find((b) => b.name === 'Course Management');
   const assignmentBoard = boards.find((b) => b.name === 'Assignment Tracker');
@@ -64,9 +122,20 @@ export function OverviewDashboard({ boards, allItems }: OverviewDashboardProps) 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h2 className="text-2xl font-bold text-gray-900">Dashboard Overview</h2>
-        <p className="text-gray-500 mt-1">EduPulse Academy — Empowering Minds, Shaping Futures</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">Dashboard Overview</h2>
+          <p className="text-gray-500 mt-1">EduPulse Academy — Empowering Minds, Shaping Futures</p>
+        </div>
+        {canCreateBoard && (
+          <button
+            onClick={() => setShowCreateDialog(true)}
+            className="bg-brand-600 text-white font-medium px-4 py-2 rounded-lg transition-opacity flex items-center gap-2 hover:opacity-90"
+          >
+            <Plus size={18} />
+            New Board
+          </button>
+        )}
       </div>
 
       {/* Stats Grid */}
@@ -203,6 +272,85 @@ export function OverviewDashboard({ boards, allItems }: OverviewDashboardProps) 
           </div>
         </div>
       </div>
+
+      {/* Slice 20B C4 Create-board dialog. Role-gated open: only admin can
+          reach this via the trigger button above. */}
+      {showCreateDialog && canCreateBoard && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between p-6 border-b border-gray-100">
+              <h3 className="text-lg font-semibold text-gray-900">
+                Create New Board
+              </h3>
+              <button
+                onClick={() => setShowCreateDialog(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+                aria-label="Close"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateBoard} className="p-6 space-y-4">
+              <div>
+                <label
+                  htmlFor="edupulse-new-board-name"
+                  className="block text-sm font-medium text-gray-700 mb-1.5"
+                >
+                  Board Name
+                </label>
+                <input
+                  id="edupulse-new-board-name"
+                  type="text"
+                  value={newBoardName}
+                  onChange={(e) => setNewBoardName(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-colors"
+                  placeholder="e.g., Student Enrollment"
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="edupulse-new-board-description"
+                  className="block text-sm font-medium text-gray-700 mb-1.5"
+                >
+                  Description (optional)
+                </label>
+                <textarea
+                  id="edupulse-new-board-description"
+                  value={newBoardDescription}
+                  onChange={(e) => setNewBoardDescription(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-colors resize-none"
+                  placeholder="What is this board for?"
+                  rows={3}
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateDialog(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creating || !newBoardName.trim()}
+                  className="px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-lg transition-opacity disabled:opacity-50 flex items-center gap-2 hover:opacity-90"
+                >
+                  {creating && (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  )}
+                  Create Board
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

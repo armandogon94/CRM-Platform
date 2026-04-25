@@ -46,14 +46,17 @@ function AppContent() {
   }, [currentBoard?.id]);
 
   // Load boards
-  useEffect(() => {
+  const refreshBoards = useCallback(async () => {
     if (!user?.workspaceId) return;
-    api.getBoards(user.workspaceId).then((res) => {
-      if (res.success && res.data) {
-        setBoards(res.data.boards || res.data as any || []);
-      }
-    });
+    const res = await api.getBoards(user.workspaceId);
+    if (res.success && res.data) {
+      setBoards(res.data.boards || res.data as any || []);
+    }
   }, [user?.workspaceId]);
+
+  useEffect(() => {
+    refreshBoards();
+  }, [refreshBoards]);
 
   // Load all items for overview dashboard
   useEffect(() => {
@@ -119,7 +122,7 @@ function AppContent() {
 
   const renderContent = () => {
     if (activeView === 'overview') {
-      return <OverviewDashboard boards={boards} allItems={allItems} />;
+      return <OverviewDashboard boards={boards} allItems={allItems} onBoardCreated={refreshBoards} />;
     }
     if (activeView === 'automations') {
       return (
