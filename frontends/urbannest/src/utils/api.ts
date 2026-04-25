@@ -80,6 +80,22 @@ export const api = {
       body: JSON.stringify({ values }),
     }),
 
+  // Slice 20B C2: wires to the flat DELETE /items/:id shim added in A2.5.
+  deleteItem: (id: number) =>
+    request<null>(`/items/${id}`, { method: 'DELETE' }),
+
+  // Slice 20B C4: wires to the flat POST /boards shim added in A2.5.
+  createBoard: (data: {
+    name: string;
+    description: string | null;
+    workspaceId: number;
+    boardType: 'main' | 'shareable' | 'private';
+  }) =>
+    request<{ board: any }>('/boards', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   // Automations
   getAutomations: (boardId: number) =>
     request<{ automations: any[] }>(`/automations?boardId=${boardId}`),
