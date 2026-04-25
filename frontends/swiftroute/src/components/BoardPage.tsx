@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { Table, LayoutGrid, Search, Filter, Plus } from 'lucide-react';
-import { BoardTable } from './BoardTable';
-import { KanbanView } from './KanbanView';
-import type { Board, Item } from '../types';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Table, LayoutGrid, Search, Filter } from 'lucide-react';
+import { BoardView } from '@crm/shared/components/board/BoardView';
+import { useToast } from '@crm/shared/components/common/ToastProvider';
+import { api } from '../utils/api';
+import type { Board, Item, BoardView as BoardViewType } from '../types';
 
 interface BoardPageProps {
   board: Board | null;
@@ -10,9 +11,120 @@ interface BoardPageProps {
   loading: boolean;
 }
 
-export function BoardPage({ board, items, loading }: BoardPageProps) {
+/**
+ * SwiftRoute state-based board page (Slice 20B C2 CRUD wiring).
+ *
+ * Unlike NovaPay (router-based), SwiftRoute's parent App.tsx drives board
+ * selection via `activeView` state and passes `board` + `items` down as
+ * props. This component mirrors them into local state so we can apply
+ * optimistic CRUD updates without threading setters through App.
+ *
+ * C2 migrates from SwiftRoute's local KanbanView/BoardTable fork to the
+ * shared BoardView. Three CRUD callbacks are wired through to the
+ * SwiftRoute-local REST client (which uses the `swiftroute_token` key
+ * convention — we keep the local api rather than shared useBoard for
+ * the same reason NovaPay did in C1).
+ *
+ *   - onItemCreate → POST /items (backend assigns groupId)
+ *   - onItemUpdate → PUT /items/:id/values (optimistic + rollback)
+ *   - onItemDelete → DELETE /items/:id (A2.5 flat shim, optimistic + rollback)
+ *
+ * Every failure emits a toast via the shared <ToastProvider>.
+ */
+export function BoardPage({ board, items: propItems, loading }: BoardPageProps) {
   const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table');
   const [searchQuery, setSearchQuery] = useState('');
+  const [items, setItems] = useState<Item[]>(propItems);
+  const { show: showToast } = useToast();
+
+  // Sync from parent when the selected board changes (App re-fetches).
+  useEffect(() => {
+    setItems(propItems);
+  }, [propItems]);
+
+  // ── CRUD handlers threaded to <BoardView> ──────────────────────────
+  const handleItemCreate = useCallback(
+    async (groupId: number, name: string) => {
+      if (!board) return;
+      const res = await api.createItem({ boardId: board.id, groupId, name });
+      if (res.success && res.data?.item) {
+        setItems((prev) => [...prev, res.data!.item as Item]);
+      } else {
+        showToast({
+          variant: 'error',
+          title: 'Could not create item',
+          description: res.error ?? 'Please try again.',
+        });
+      }
+    },
+    [board, showToast]
+  );
+
+  const handleItemUpdate = useCallback(
+    async (itemId: number, columnId: number, value: unknown) => {
+      // Optimistic update — write locally, roll back on error.
+      const snapshot = items;
+      setItems((prev) =>
+        prev.map((it) => {
+          if (it.id !== itemId) return it;
+          const cvs = it.columnValues ?? [];
+          const idx = cvs.findIndex((c) => c.columnId === columnId);
+          const nextCvs =
+            idx >= 0
+              ? cvs.map((c) =>
+                  c.columnId === columnId ? { ...c, value } : c
+                )
+              : [
+                  ...cvs,
+                  { id: -1, itemId, columnId, value } as (typeof cvs)[number],
+                ];
+          return { ...it, columnValues: nextCvs };
+        })
+      );
+      const res = await api.updateColumnValues(itemId, [{ columnId, value }]);
+      if (!res.success) {
+        setItems(snapshot);
+        showToast({
+          variant: 'error',
+          title: 'Could not update value',
+          description: res.error ?? 'Please try again.',
+        });
+      }
+    },
+    [items, showToast]
+  );
+
+  const handleItemDelete = useCallback(
+    async (itemId: number) => {
+      const snapshot = items;
+      setItems((prev) => prev.filter((i) => i.id !== itemId));
+      const res = await api.deleteItem(itemId);
+      if (!res.success) {
+        setItems(snapshot);
+        showToast({
+          variant: 'error',
+          title: 'Could not delete item',
+          description: res.error ?? 'Please try again.',
+        });
+      }
+    },
+    [items, showToast]
+  );
+
+  // Shared BoardView expects a `currentView: BoardView` prop matching the
+  // selected UI mode — synthesise one from local viewMode state rather
+  // than pulling the BoardView list from the API.
+  const currentView: BoardViewType = useMemo(
+    () => ({
+      id: viewMode === 'table' ? 1 : 2,
+      boardId: board?.id ?? 0,
+      name: viewMode === 'table' ? 'Table' : 'Kanban',
+      viewType: viewMode,
+      settings: {},
+      isDefault: false,
+    }),
+    [viewMode, board?.id]
+  );
 
   if (loading) {
     return (
@@ -45,12 +157,6 @@ export function BoardPage({ board, items, loading }: BoardPageProps) {
           {board.description && (
             <p className="text-sm text-gray-500 mt-0.5">{board.description}</p>
           )}
-        </div>
-        <div className="flex items-center gap-2">
-          <button className="btn-primary flex items-center gap-1.5 text-sm">
-            <Plus size={16} />
-            New Item
-          </button>
         </div>
       </div>
 
@@ -102,13 +208,18 @@ export function BoardPage({ board, items, loading }: BoardPageProps) {
         </div>
       </div>
 
-      {/* Board Content */}
+      {/* Board Content — Slice 20B C2 uses shared BoardView so CRUD
+          affordances (inline + Add item / kebab delete / inline edit)
+          are consistent with every industry migration. */}
       <div className="card p-4">
-        {viewMode === 'table' ? (
-          <BoardTable board={board} items={filteredItems} />
-        ) : (
-          <KanbanView board={board} items={filteredItems} />
-        )}
+        <BoardView
+          board={board as unknown as Parameters<typeof BoardView>[0]['board']}
+          items={filteredItems as unknown as Parameters<typeof BoardView>[0]['items']}
+          currentView={currentView as unknown as Parameters<typeof BoardView>[0]['currentView']}
+          onItemCreate={handleItemCreate}
+          onItemUpdate={handleItemUpdate}
+          onItemDelete={handleItemDelete}
+        />
       </div>
 
       {/* Footer Stats */}
