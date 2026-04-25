@@ -1710,6 +1710,183 @@ The E2E realtime spec uses Playwright's `browser.newContext()` to spawn a parall
 
 ---
 
+#### Slice 21: File Upload UI + Person Picker UI + Bulk Actions (Size: L, parent of 21A/21B/21C)
+
+**Objective:** Wire the three deferred-from-Slice-20 features end-to-end across all 10 industries: file upload UI for the Files column type, member-picker UI for the Person column type, and multi-select bulk actions on Table view. All three reuse the locked Slice 20 patterns (shared `BoardView`, `useBoard` mutations, `useCanEdit` RBAC, ToastProvider, ConfirmDialog) — every change lands in `@crm/shared`, no per-industry fanout required (Slice 20.5 already aligned all 10 industries on shared components).
+
+**Prerequisite:** Slice 20A + 20B + 20.5 fully shipped. Specifically:
+- Slice 8 file routes (`POST /files/upload`, `GET /files/:id/download`, `DELETE /files/:id`) exist with workspace quota enforcement (10MB/file, configurable workspace storage limit via `StorageService.isWithinQuota`).
+- Shared `useBoard` hook on every industry (Slice 20.5).
+- `ColumnEditor` covers status/text/number/date/checkbox/email/url/phone/dropdown — `person` case exists as a stub with no backend integration; `files` case does not exist (cell falls through to read-only render).
+
+**Decision (parent ADR): Three sub-slices, dispatched in parallel after this spec lands**
+
+| Option | Tradeoffs |
+|--------|-----------|
+| One mega-slice with 3 sequential phases | Largest review surface; serializes work that doesn't share files |
+| **Three sub-spec slices (21A/21B/21C), parallel after this parent ADR (chosen)** | 21A modifies ColumnEditor's files case + adds FileUploader component; 21B modifies ColumnEditor's person case + new backend endpoint; 21C modifies TableView's row-select mechanics + new BulkActionBar component. Zero file overlap. Each ships independently; aggregate verdict in this parent's success criteria. |
+| Three sequential sub-slices (21A → 21B → 21C) | Loses parallelism with no compensating benefit |
+
+**Chosen: parallel sub-slices.** This parent spec defines the shared invariants (RBAC gating, ConfirmDialog reuse, real-time echo expectation) and three boundaries; each sub-slice gets its own `/spec` and produces its own `plans/slice-21X-plan.md`.
+
+---
+
+**Backend reality check (corrections from the brief):**
+
+The brief assumed `POST /items/:id/files`. **Actual route is `POST /files/upload`** (multipart/form-data, body fields `itemId` + `columnValueId`, returns `{ success, data: { file } }` with 413 on quota exceeded or per-file >10MB). Sub-slice 21A's spec uses the actual route.
+
+The brief assumed `GET /workspaces/:id/members` exists. **It doesn't.** Sub-slice 21B must add it as a small backend addition (~30 LOC) before the UI can land. Endpoint contract: `GET /api/v1/workspaces/:workspaceId/members?search=<query>&limit=50` returning `{ success, data: { members: User[] }, pagination }`. Authorization: `req.user.workspaceId` must equal `:workspaceId` (no cross-workspace member peeking — same hard boundary as `POST /boards`).
+
+---
+
+**Open questions — recommended answers:**
+
+1. **Three sub-slices in parallel vs one mega-slice** → **three sub-slices (chosen above).** Parent spec sets shared contracts; sub-specs land independently.
+
+2. **Bulk endpoint vs parallel single calls** → **parallel single calls (`Promise.all(useBoard.deleteItem)`).** Backend test surface stays at zero new lines; HTTP/2 multiplexes the requests. If a 100-row delete surfaces a real perf regression in production, add `PATCH /api/v1/items/bulk` later as additive — Hyrum's Law cost is zero because nobody depends on it yet.
+
+3. **Quota UX: client projection vs server 413** → **both.** Client-side: read `workspace.storageUsed` and `workspace.storageLimit` via `useWorkspace()` (already exposed); block the upload if `storageUsed + file.size > storageLimit`. Server-side: 413 is still the source of truth for concurrent-upload races. Toast surfaces both.
+
+4. **Member-search debounce** → **300ms debounce, 1-character minimum.** (The brief said "500-char minimum" — typo, meant 1 character. 0-character search would dump the whole member list; 1+ char debounces typing.) Empty input shows the most-recent 50 members (recency = `lastActiveAt` desc, fallback to `createdAt` desc). Debounce drops in-flight requests when a newer query arrives.
+
+5. **Multi-select keyboard support** → **Shift-click range + Cmd/Ctrl-click toggle + Escape clears.** Standard table-app conventions. Click without modifier replaces the selection (1 row = active). Click+drag NOT supported in 21C (defer).
+
+6. **Bulk-action confirmation** → **Delete only.** Status change is reversible; bulk-assign is reversible; delete is soft but feels destructive. ConfirmDialog from B1 reused — title "Delete N items?", description "This cannot be undone."
+
+7. **Real-time echo for bulk operations** → **render N row-removals separately, no batching.** `useBoard`'s `onItemDeleted` handler is idempotent (filters by id) and cheap. Batching would require server-side WS aggregation, which is a non-trivial change for a UI that already handles 100-row mutations smoothly.
+
+8. **Scope exclusions confirmed:**
+   - File preview UI (PDF/image/video render in-place) → Slice 22 candidate
+   - Drag-drop reordering of files within an item → Slice 22 candidate
+   - Bulk-move-to-group, bulk-duplicate → Slice 23 candidate
+   - Infinite-scroll member search → 21B paginates at 50, "Load more" button if needed
+   - Avatar upload UI for Person assignees → Slice 22 candidate (read-only avatar URLs from User model for now)
+
+---
+
+**Sub-slice boundaries:**
+
+#### Slice 21A — File upload UI (shared library only)
+
+- **`@crm/shared/src/components/board/FileUploader.tsx`** (new) — drag-drop + click-to-pick, progress bar driven by `XMLHttpRequest.upload.onprogress`, uploaded-files list with download/delete affordances. Uses `api.files.upload(file, { itemId, columnValueId })` from a new typed `api.files.*` client.
+- **`@crm/shared/src/utils/api.ts`** (modify) — add `api.files.upload`, `api.files.delete`, `api.files.list({ itemId })` typed methods.
+- **`@crm/shared/src/components/board/ColumnEditor.tsx`** (modify) — add `case 'files':` rendering `<FileUploader>`.
+- **Quota indicator** — `@crm/shared/src/components/board/BoardView.tsx` (modify) — read `workspace.storageUsed` + `workspace.storageLimit` and render a thin progress bar in the header when within 10% of cap.
+- **Tests** — vitest cases for FileUploader (drag handler / progress / quota-block) + api.files.upload (multipart shape, auth header, 413 surfaces error toast) + 3 Playwright specs in `e2e/specs/slice-21/file-upload.spec.ts` × 3 industries.
+- **Files touched (≤8):** 4 modified + 1 new component + 1 new test + 1 e2e spec.
+- **Size:** M.
+
+#### Slice 21B — Person picker UI (shared library + 1 backend endpoint)
+
+- **`backend/src/routes/workspaces.ts`** (modify) — add `GET /:workspaceId/members?search=...&limit=...` route. Auth gate: `req.user.workspaceId === parsed workspaceId`. Returns `{ members: User[] }` from `WorkspaceService.searchMembers(workspaceId, search, limit)`. Default search = empty (returns recent 50).
+- **`backend/src/services/WorkspaceService.ts`** (modify) — add `searchMembers(workspaceId, search, limit)` using Sequelize `Op.iLike` on email/firstName/lastName.
+- **`backend/src/__tests__/routes/workspaces.test.ts`** (modify) — add 5 test cases for the new endpoint (admin-success, foreign-workspace 403, unauth 401, search-with-results, empty-search-returns-recent).
+- **`@crm/shared/src/utils/api.ts`** (modify) — add `api.workspaces.searchMembers(workspaceId, search)` typed client.
+- **`@crm/shared/src/components/board/ColumnEditor.tsx`** (modify) — replace the stub `case 'person':` with a member-search dropdown driven by the new endpoint. Debounced at 300ms with `useEffect` cleanup. Multi-assign chip stack when `column.config.allow_multiple === true`.
+- **Tests** — vitest cases for ColumnEditor person case (search debounce, single vs multi-assign, click-to-assign, click-to-remove) + 3 Playwright specs in `e2e/specs/slice-21/person-picker.spec.ts` × 3 industries.
+- **Files touched (≤7):** 4 modified + 2 new test files + 1 e2e spec.
+- **Size:** M.
+
+#### Slice 21C — Bulk actions (shared library only)
+
+- **`@crm/shared/src/components/board/TableView.tsx`** (modify) — add a leading checkbox column (header has "Select all", per-row checkbox), shift-click range select via tracked `lastClickedItemId`, Cmd/Ctrl-click toggle, Escape clears. Selection state lives in TableView's `useState<Set<number>>`.
+- **`@crm/shared/src/components/board/BulkActionBar.tsx`** (new) — floating action bar at the bottom when `selectedIds.size > 0`. Shows count + actions: "Delete", "Change status", "Assign". Each action calls `Promise.all(...)` over the relevant `useBoard` mutation. ConfirmDialog (from B1) reused for delete only.
+- **`@crm/shared/src/components/board/BoardView.tsx`** (modify) — pass `useBoard` mutations + `useCanEdit` matrix down to BulkActionBar so it can render correctly per role.
+- **Tests** — vitest cases for TableView (multi-select interactions: shift-click, cmd-click, escape-clear, select-all) + BulkActionBar (action dispatch, confirm dialog, RBAC gating) + 3 Playwright specs in `e2e/specs/slice-21/bulk-actions.spec.ts` × 3 industries.
+- **Files touched (≤7):** 2 modified + 1 new component + 2 new test files + 1 e2e spec.
+- **Size:** M.
+
+---
+
+**Real-time echo expectation (parent invariant for all 3):**
+
+Each sub-slice's mutations route through `useBoard` (shared library, Slice 20.5 wired). `useBoard` already subscribes to the board's Socket.io room via `useWebSocket(boardId)` and routes server echoes (`item:created`, `item:updated`, `item:deleted`, `column:value:changed`, `file:created`, `file:deleted`) into local state. Sub-slices verify the echo via Playwright two-context tests (matching the Slice 20.5 `realtime-echo.spec.ts` pattern):
+- 21A: file uploaded in tab A → tab B's file list shows it within 2s
+- 21B: Person re-assigned in tab A → tab B's cell renders new avatar within 2s
+- 21C: bulk-delete in tab A → tab B's table shows N rows removed within 2s (per-item echoes, not batched)
+
+⚠️ **Backend note for echo:** the existing file routes in Slice 8 do NOT emit Socket.io events on file create/delete (they predate Slice 20's WS work). Sub-slice 21A must add `WebSocketService.emitToBoard(boardId, 'file:created', {...})` calls in the file route handlers — small backend addition. Otherwise tab B never sees the echo.
+
+---
+
+**RBAC matrix (parent invariant):**
+
+| Role | File upload | File delete | Person re-assign | Bulk delete | Bulk status-change |
+|------|:---:|:---:|:---:|:---:|:---:|
+| admin | ✓ | ✓ | ✓ | ✓ | ✓ |
+| member | ✓ (own items) | ✓ (own files) | ✓ | ✓ (own items) | ✓ |
+| viewer | ✗ | ✗ | ✗ | ✗ | ✗ |
+
+UI gates via `useCanEdit().canEditInline` (file/person UI) and `useCanEdit().canDelete` (bulk delete). Server enforces "own items" semantics — UI shows the buttons; server 403s if the action targets a foreign-owned item, surfaced as a toast.
+
+---
+
+**Files to create (across the 3 sub-slices, ~12 total):**
+
+- `frontends/_shared/src/components/board/FileUploader.tsx` (21A)
+- `frontends/_shared/src/__tests__/FileUploader.test.tsx` (21A)
+- `frontends/_shared/src/__tests__/api.files.test.ts` (21A)
+- `e2e/specs/slice-21/file-upload.spec.ts` (21A)
+- `frontends/_shared/src/__tests__/api.workspaces.test.ts` (21B)
+- `frontends/_shared/src/__tests__/ColumnEditor.person.test.tsx` (21B)
+- `e2e/specs/slice-21/person-picker.spec.ts` (21B)
+- `frontends/_shared/src/components/board/BulkActionBar.tsx` (21C)
+- `frontends/_shared/src/__tests__/BulkActionBar.test.tsx` (21C)
+- `frontends/_shared/src/__tests__/TableView.multiselect.test.tsx` (21C)
+- `e2e/specs/slice-21/bulk-actions.spec.ts` (21C)
+
+**Files to modify (across the 3 sub-slices, ~7 total):**
+
+- `frontends/_shared/src/components/board/ColumnEditor.tsx` (21A files case + 21B person case)
+- `frontends/_shared/src/components/board/BoardView.tsx` (21A quota indicator + 21C BulkActionBar wiring)
+- `frontends/_shared/src/components/board/TableView.tsx` (21C multi-select)
+- `frontends/_shared/src/utils/api.ts` (21A `api.files.*` + 21B `api.workspaces.searchMembers`)
+- `frontends/_shared/src/hooks/useBoard.ts` (21A `onFileCreated`/`onFileDeleted` WS handlers)
+- `backend/src/routes/workspaces.ts` (21B member-search route)
+- `backend/src/services/WorkspaceService.ts` (21B `searchMembers` method)
+- `backend/src/routes/files.ts` (21A WS emit on upload + delete)
+- `backend/src/__tests__/routes/workspaces.test.ts` (21B endpoint tests)
+- `SPEC.md` (this section)
+
+---
+
+**Acceptance (parent — sub-slices have their own):**
+
+- [ ] Admin can drag a file onto a Files cell → progress bar → file appears with download + delete affordances. Quota shown in board header. Reload → file persists.
+- [ ] Admin can click a Person cell → search dropdown debounces input → select a member → cell shows avatar. Multi-assign columns show chip stack. Reload → assignment persists.
+- [ ] Admin can shift-click a row range on Table view → floating action bar appears → Delete with confirmation → all selected items removed. Status-change works without confirmation.
+- [ ] Real-time: any mutation in tab A reflects in tab B within 2s.
+- [ ] Viewer role sees no file upload, no person picker, no row checkboxes, no action bar (verified by per-sub-slice rbac-viewer test cases).
+- [ ] 9 new Playwright specs in `e2e/specs/slice-21/` (3 sub-slices × 3 cases each), parameterized across NovaPay/MedVista/JurisPath.
+- [ ] All 10 industries' typecheck + build still clean (no per-industry fanout, but verify regression).
+- [ ] `@crm/shared` test count grows by ≥30 (estimated: 10 FileUploader + 5 api.files + 5 ColumnEditor.person + 8 TableView.multiselect + 6 BulkActionBar = 34 new).
+
+---
+
+**Boundaries (slice-specific):**
+
+- Always: route every mutation through `useBoard` so real-time echo is automatic. No bypass routes.
+- Always: gate UI affordances behind `useCanEdit()`. Do not duplicate the role check inline.
+- Always: validate at the system boundary — file MIME-type whitelist + size on the client AND on the server (multer config already enforces 10MB).
+- Ask first: changing the file-route URL shape (would break the Slice 8 contract; 21A's brief assumed a different shape and we corrected it — don't keep migrating).
+- Ask first: introducing `PATCH /items/bulk` (Hyrum's Law: once it ships, it's a permanent commitment).
+- Ask first: cross-workspace member search (current invariant: `req.user.workspaceId === :workspaceId`).
+- Never: expose another workspace's members via the search endpoint — `WorkspaceService.searchMembers` MUST scope by workspaceId.
+- Never: emit `file:created` for files outside the user's workspace (cross-workspace WS leak).
+
+**Success criteria (slice-level):**
+
+- [ ] All 3 sub-specs (21A/21B/21C) drafted and approved
+- [ ] All 3 sub-slices shipped (each with its own plan + verification)
+- [ ] All 9 Playwright specs typecheck clean
+- [ ] `@crm/shared` test count ≥ 103 (73 baseline + ~30 new)
+- [ ] Backend test count grows by ≥5 (the workspaces member-search tests from 21B)
+- [ ] All 10 industries still typecheck + build clean post-merge
+- [ ] No new entries in `plans/slice-20-verification.md` open-followups list
+- [ ] SPEC.md §Slice 21 success criteria all ticked
+
+---
+
 ## Success Criteria
 
 - [ ] All 18 vertical slices implemented and working
