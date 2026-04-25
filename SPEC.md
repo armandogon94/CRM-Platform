@@ -1555,6 +1555,161 @@ Accessibility: `role="status"` for success/info, `role="alert"` for error/warnin
 
 ---
 
+#### Slice 20.5: Token-Key Unification + Shared `useBoard` Adoption + Real-Time WS Echo (Size: M)
+
+**Objective:** Close the only unticked Slice 20 success criterion: real-time Socket.io echo on the CRUD path. Industries currently bypass the shared `useBoard` hook because each one stores its JWT under a slug-prefixed localStorage key (e.g. `novapay_token`) while shared `useWebSocket` hardcodes `crm_access_token`. This slice aligns the shared utilities with each industry's existing token convention via configuration (rather than a hard-cut migration of localStorage keys), then migrates each industry's `BoardPage` from its locally-handled CRUD callbacks to the shared `useBoard` mutations — so every CRUD operation rides the same Socket.io echo path that Slice 19's E2E flow already proved works.
+
+**Prerequisite:** Slice 20A + 20B merged. All 10 industries import `@crm/shared`, mount `<ToastProvider>`, render `<BoardView>`, and have admin-gated New Board dialogs.
+
+**Decision (ADR): Configurable shared utilities, NOT a hard-cut localStorage migration**
+
+| Option | Description | Tradeoffs |
+|--------|-------------|-----------|
+| Hard-cut to `crm_access_token` | All 10 industries write JWTs to a single shared key | Breaks every dev's persisted session on first run. Forces a logout-then-login dance across the team. Conflicts with the existing per-industry `setAuthToken` paths that any open browser session is using. Hyrum's Law issue: the slug-prefixed keys are observable; some Slice 19 / 19B / 19.7 tooling may already grep for them. |
+| **Configurable shared utilities (chosen)** | Shared `useWebSocket` exposes a `configureWebSocket({ tokenKey })` like `configureApi` already does. Each industry's `main.tsx` calls both at bootstrap with the slug-prefixed key. | Symmetric with the existing `configureApi` pattern. Zero localStorage churn — existing dev sessions keep working. One-line addition per industry. The token-key choice becomes an industry-level config detail rather than a shared-library-wide decision. |
+| Both keys (read both, write the unified one) | Shared utilities try `crm_access_token` first, fall back to slug-prefixed | Two-version rule violation. Adds confusing debug surface. Migration "later" never happens. |
+
+**Chosen:** Configurable shared utilities. Mirrors the existing `configureApi({ tokenKey })` API surface (already shipped Slice 16). One-Version Rule: each industry has exactly one token key, and the shared library has one configuration knob.
+
+---
+
+**Surface contract (additions to `@crm/shared`):**
+
+```ts
+// frontends/_shared/src/hooks/useWebSocket.ts (extended)
+export function configureWebSocket(options: { tokenKey?: string }): void;
+
+// Default remains 'crm_access_token' for back-compat with Slice 19 E2E paths
+// that already use that key. Industries opt into their slug-prefixed key by
+// calling configureWebSocket at bootstrap, alongside the existing
+// configureApi call.
+```
+
+Both `configureApi` and `configureWebSocket` are idempotent and can be called multiple times — the last call wins. They're called in `main.tsx` BEFORE `<ToastProvider>` mounts so by the time any component reads the token, both readers are aligned.
+
+---
+
+**Per-industry migration pattern (10 industries, parallelizable):**
+
+Each industry's `main.tsx`:
+```tsx
+// New 2-line addition after the existing imports
+import { configureApi } from '@crm/shared/utils/api';
+import { configureWebSocket } from '@crm/shared/hooks/useWebSocket';
+
+configureApi({ tokenKey: '<slug>_token' });
+configureWebSocket({ tokenKey: '<slug>_token' });
+
+// Existing ReactDOM.createRoot(...) below — unchanged
+```
+
+Each industry's `BoardPage.tsx` migration (drop local handlers, adopt shared mutations):
+```tsx
+// REMOVE: handleItemCreate, handleItemUpdate, handleItemDelete
+// REMOVE: useState<Item[]>(...) for local items array
+// ADD:
+const { items, createItem, updateItemValue, deleteItem } = useBoard(boardId);
+
+// Then in <BoardView>:
+//   onItemCreate={canItemCrud ? createItem : undefined}
+//   onItemUpdate={canItemCrud ? updateItemValue : undefined}
+//   onItemDelete={canItemCrud ? deleteItem : undefined}
+```
+
+`useBoard` already mounts `useWebSocket(boardId)` and routes `onItemCreated` / `onItemUpdated` / `onItemDeleted` socket events into local state. With the token key now reachable, the WS connection authenticates correctly, the room-subscription works, and a second tab observing the same board sees mutations within ~2s of the first tab acting.
+
+---
+
+**Acceptance criteria:**
+
+- [ ] `configureWebSocket({ tokenKey })` exported from `@crm/shared/hooks/useWebSocket`; default remains `crm_access_token`.
+- [ ] All 10 industries' `main.tsx` calls `configureApi` + `configureWebSocket` with their slug-prefixed token key BEFORE `<ToastProvider>` mounts.
+- [ ] All 10 industries' `BoardPage.tsx` consume `useBoard()` for both `items` state AND CRUD mutations — local `useState<Item[]>` + local handlers removed.
+- [ ] **Real-time E2E proof:** a new spec `e2e/specs/slice-20/realtime-echo.spec.ts` opens two browser contexts as the same admin, performs `create-item` / `update-status` / `delete-item` in tab A, and asserts tab B reflects each change within `expect.poll`'s 2s ceiling.
+- [ ] Slice 19 NovaPay realtime spec (`02-item-crud-and-realtime.spec.ts`) still passes — proves no regression on the existing realtime path.
+- [ ] All 18 Phase D Slice 20 specs still pass — proves the migration doesn't break any of the previously-passing flows.
+- [ ] Per-industry `npx tsc --noEmit` clean.
+- [ ] Per-industry `npm run build` succeeds.
+- [ ] `@crm/shared` test suite green (with a new `configureWebSocket.test.ts` covering 4 cases: default key, override key, override+revert, multiple-call-last-wins).
+- [ ] SPEC.md §Slice 20 success criterion #5 (real-time echo) ticks ✅.
+
+---
+
+**Files to create:**
+- `frontends/_shared/src/__tests__/configureWebSocket.test.ts` — 4 vitest cases
+- `e2e/specs/slice-20/realtime-echo.spec.ts` — 1 parameterized spec across 3 industries (matches the D1–D3 parameterization pattern)
+
+**Files to modify:**
+- `frontends/_shared/src/hooks/useWebSocket.ts` — add `configureWebSocket` export, replace hardcoded `TOKEN_KEY` with module-level `_tokenKey` variable initialized to `'crm_access_token'`
+- `frontends/<industry>/src/main.tsx` × 10 — add `configureApi` + `configureWebSocket` bootstrap calls
+- `frontends/<industry>/src/components/BoardPage.tsx` × 10 — migrate from local CRUD handlers to `useBoard` mutations
+- `SPEC.md` — this section + tick the real-time success criterion
+
+---
+
+**Test strategy:**
+
+| Layer | What's tested | Where |
+|-------|---------------|-------|
+| Unit (vitest) | `configureWebSocket` config-key behavior | `_shared/__tests__/configureWebSocket.test.ts` |
+| Unit (vitest) | `useBoard` mutations still pass with the new shared default | Existing `useBoard.mutations.test.tsx` re-runs unchanged |
+| E2E (Playwright) | Real-time echo across two contexts | `e2e/specs/slice-20/realtime-echo.spec.ts` × 3 industries |
+| E2E regression | Slice 19 realtime + Slice 20 18 specs | All re-run; must stay green |
+
+The E2E realtime spec uses Playwright's `browser.newContext()` to spawn a parallel session as the same admin (no second login flow needed; storage state is shared). Two pages on the same `/boards/:id` route → action in one → `expect.poll(...).toPass({ timeout: 2_000 })` in the other.
+
+---
+
+**Migration order:**
+
+1. **Shared library first** (sequential, S):
+   - Make `useWebSocket` token-key-configurable
+   - Add unit tests
+   - Verify shared tests stay 69/69 + 4 new = 73/73
+2. **Per-industry parallel fanout** (10 worktree-isolated agents on Opus):
+   - Each agent: 2-line `main.tsx` config addition + `BoardPage.tsx` migration to `useBoard`
+   - Per-industry `tsc + build` verify gate
+   - 10 atomic commits
+3. **E2E spec** (sequential, S):
+   - Add `realtime-echo.spec.ts`
+   - Verify locally on at least one industry
+4. **Verification log addendum** (XS):
+   - Append to `plans/slice-20-verification.md`
+   - Tick SPEC §Slice 20 success criterion #5
+
+⚠️ **Lesson from Slice 20B fanout:** the 7-parallel-agent dispatch produced commit-graph chaos due to git-index races. For Slice 20.5, dispatch agents in **3 waves of 3-4 agents** rather than 10 simultaneously, OR move to true `git worktree add`-per-agent isolation. The plan should document the chosen mitigation upfront.
+
+---
+
+**Out of scope:**
+- Hard-cut localStorage migration to a single shared key (rejected in ADR above)
+- WebSocket reconnect/backoff polish (existing socket.io client default is fine for Slice 20.5)
+- Per-tab session locking (multi-tab CRUD is the explicit success criterion, not a constraint)
+- Server-Sent Events fallback for environments where WS is blocked
+- Optimistic-update unification for the create path (currently industries do `setItems((prev) => [...prev, item])` locally — adopting `useBoard` will rely solely on the WS echo for create, matching Slice 20A's design contract for `createItem`)
+
+**Boundaries (slice-specific):**
+- Always: pass slug-prefixed token key to BOTH `configureApi` and `configureWebSocket` in main.tsx — drift between the two would cause the API to authenticate as one user while the WS authenticates as another (or fails)
+- Always: run the realtime-echo spec against at least one industry locally before declaring the slice done
+- Ask first: changing the default token key from `crm_access_token` to anything else — that breaks Slice 19 E2E
+- Ask first: introducing additional shared-state hooks (`useNotifications`, `useActivityLog`) that read tokens — they would also need a configure call
+- Never: hard-cut localStorage keys without an opt-in migration — existing dev/test sessions die instantly
+- Never: duplicate the token key (industries write to BOTH `<slug>_token` AND `crm_access_token`) — explicitly the rejected "both keys" option from the ADR
+
+**Success criteria (slice-level):**
+- [ ] `configureWebSocket` exported + 4 unit tests pass
+- [ ] All 10 industries call both configure functions in `main.tsx`
+- [ ] All 10 industries' `BoardPage` consume shared `useBoard` mutations (zero local CRUD handlers remain)
+- [ ] `realtime-echo.spec.ts` passes across at least 3 industries (NovaPay, MedVista, JurisPath)
+- [ ] All 18 pre-existing Phase D Slice 20 specs still pass
+- [ ] Slice 19 `02-item-crud-and-realtime.spec.ts` still passes (regression guard)
+- [ ] Per-industry `tsc --noEmit` + `npm run build` clean across all 10
+- [ ] `@crm/shared` 73/73 tests pass (69 existing + 4 new)
+- [ ] SPEC §Slice 20 criterion #5 (real-time echo) ticks ✅
+- [ ] No new entries in `plans/slice-20-verification.md` open-followups list
+
+---
+
 ## Success Criteria
 
 - [ ] All 18 vertical slices implemented and working
