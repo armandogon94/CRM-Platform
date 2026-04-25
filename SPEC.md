@@ -1887,6 +1887,312 @@ UI gates via `useCanEdit().canEditInline` (file/person UI) and `useCanEdit().can
 
 ---
 
+##### Slice 21A: File upload UI (Size: M)
+
+**Objective:** Make the Files column type interactive: drag-drop OR click-to-pick a file → upload via the existing Slice 8 route → progress bar → file appears in the cell with download + delete affordances. Add a workspace-storage quota indicator to BoardView's header. Backend additions: WebSocket emit on upload + delete (so tab B observes within 2s).
+
+**Component shape (`@crm/shared/src/components/board/FileUploader.tsx`):**
+
+```ts
+interface FileUploaderProps {
+  /** ID of the item the file is attached to. */
+  itemId: number;
+  /** Optional column-value scoping (used when File column attaches files inline). */
+  columnValueId?: number;
+  /** Existing files on this attachment scope (renders the list). */
+  files: FileAttachment[];
+  /** Workspace-level storage budget — used for client-side quota projection. */
+  workspaceStorage: { used: number; limit: number };
+  /** Called after a successful upload + WS echo. Optional — useBoard handles state. */
+  onUploaded?: (file: FileAttachment) => void;
+  onDeleted?: (fileId: number) => void;
+}
+```
+
+Render state machine:
+1. **Idle** — drag-target outline + "Drop file or click to upload" + file list below
+2. **Hovering** — outline thickens (drag-over)
+3. **Uploading** — progress bar (0–100%) driven by `XMLHttpRequest.upload.onprogress`
+4. **Success** — flash green for 1s, then return to idle with new file in the list
+5. **Error** — toast emitted, idle resumes (preserves the dropped file in a "retry" badge for 30s)
+
+**ADR (21A-1): XHR vs fetch for upload progress** — `fetch()` doesn't expose upload progress events; `XMLHttpRequest.upload.onprogress` does. Use XHR for the upload call only; rest of `api.files.*` stays on `fetch`. Wrapped in a small `uploadWithProgress(url, formData, onProgress)` helper in `api.ts`.
+
+**Quota UX (parent §3 confirmed: both client + server):**
+- Client: read `workspace.storageUsed + storageLimit` via `useWorkspace()`. Block upload + emit warning toast if `storageUsed + file.size > storageLimit`.
+- Server: 413 still authoritative — concurrent races could slip past client check.
+- Quota indicator in BoardView header: thin progress bar + "X MB / Y MB" text. Color: green <70%, yellow 70-90%, red >90%.
+
+**MIME-type whitelist (security boundary):**
+- Allowed: `image/*`, `application/pdf`, `text/csv`, `text/plain`, `application/vnd.openxmlformats-officedocument.*` (xlsx/docx/pptx), `application/zip`, `application/json`
+- Validated client-side (input `accept` attribute + drop-handler check) AND server-side (Slice 8 already does this — verify it's still correct).
+- Blocked: executables (`.exe`, `.dll`, `.so`), shell scripts, anything `application/x-`.
+
+**Backend WS emit additions (`backend/src/routes/files.ts`):**
+- After successful `POST /files/upload`: `WebSocketService.emitToBoard(item.boardId, 'file:created', { file })` if `itemId` is set.
+- After successful `DELETE /files/:id`: `WebSocketService.emitToBoard(item.boardId, 'file:deleted', { fileId, itemId })`.
+- `useBoard.ts` adds `onFileCreated` / `onFileDeleted` handlers that update the relevant item's column-value file list.
+
+**Open questions — recommended answers:**
+1. **Multi-file upload?** → **No.** One file at a time per drop. Multi-file is Slice 22 scope.
+2. **Resumable uploads?** → **No.** 10MB/file limit makes interruption rare; if a 9MB upload fails at 8MB, user re-drops. Spec keeps the door open by structuring the upload helper around a single XHR call.
+3. **In-flight upload survives cell-edit cancel?** → **Yes.** The XHR continues; the cell editor closes but the upload state is owned by the FileUploader component which can render asynchronously. On success, useBoard's `onFileCreated` socket echo updates the column value regardless of whether the editor is still open.
+
+**Acceptance criteria (21A):**
+- [ ] FileUploader component renders idle/hovering/uploading/success/error states
+- [ ] Drag-drop AND click-to-pick both work
+- [ ] Progress bar advances during upload (verified via mocked XHR `onprogress` event in vitest)
+- [ ] Quota projection blocks upload when projected total exceeds limit (no XHR fired)
+- [ ] Server 413 surfaces an error toast with the server's error message
+- [ ] MIME-type rejected client-side surfaces a toast; no XHR fired
+- [ ] Successful upload appends file to the list optimistically AND on WS echo (idempotent)
+- [ ] Delete button on a file fires a confirm dialog (reuses ConfirmDialog from B1)
+- [ ] WebSocket echo: tab B sees the new file in the list within 2s
+- [ ] Viewer role: FileUploader renders read-only (file list visible, no drop zone, no delete buttons)
+
+**Files touched (≤8):**
+- `frontends/_shared/src/components/board/FileUploader.tsx` (new)
+- `frontends/_shared/src/__tests__/FileUploader.test.tsx` (new — 10 cases)
+- `frontends/_shared/src/__tests__/api.files.test.ts` (new — 5 cases)
+- `frontends/_shared/src/components/board/ColumnEditor.tsx` (modify — add `case 'files':`)
+- `frontends/_shared/src/components/board/BoardView.tsx` (modify — quota indicator)
+- `frontends/_shared/src/utils/api.ts` (modify — `api.files.upload/list/delete` + `uploadWithProgress` helper)
+- `frontends/_shared/src/hooks/useBoard.ts` (modify — `onFileCreated`/`onFileDeleted` WS handlers)
+- `backend/src/routes/files.ts` (modify — WS emit on upload + delete)
+- `e2e/specs/slice-21/file-upload.spec.ts` (new — 3 cases × 3 industries = 9 tests)
+
+**Boundaries:**
+- Always: validate MIME at client AND server. Defense in depth.
+- Always: emit `file:created` / `file:deleted` to the item's board room (not the workspace) so non-board-viewers don't get spammed.
+- Never: trust client-supplied `mimeType` — server reads from the actual upload (already correct in Slice 8).
+- Never: accept files >10MB at the client (UI projection match the server limit).
+
+---
+
+##### Slice 21B: Person picker UI (Size: M)
+
+**Objective:** Replace ColumnEditor's stub `case 'person':` with a member-search dropdown driven by a new backend endpoint `GET /workspaces/:id/members?search=...`. Single-assign columns store one user; multi-assign columns store an array (driven by `column.config.allow_multiple`). Search debounces at 300ms with 1-character minimum.
+
+**New backend endpoint:**
+
+```
+GET /api/v1/workspaces/:workspaceId/members?search=<q>&limit=50
+
+Response 200:
+{
+  success: true,
+  data: { members: [{ id, email, firstName, lastName, avatar, role }, ...] },
+  pagination: { page: 1, limit: 50, total: <n>, totalPages: <m> }
+}
+
+Authorization: req.user.workspaceId === parsed :workspaceId. Foreign workspace → 403.
+Empty search: returns 50 most-recently-active members (lastActiveAt desc, fallback createdAt desc).
+Non-empty search: ILIKE on email + firstName + lastName, OR-joined.
+```
+
+**Backend service (`WorkspaceService.searchMembers`):**
+
+```ts
+searchMembers(
+  workspaceId: number,
+  search: string,
+  limit = 50
+): Promise<{ members: User[]; total: number }> {
+  const where = { workspaceId };
+  if (search.trim().length > 0) {
+    where[Op.or] = [
+      { email: { [Op.iLike]: `%${search}%` } },
+      { firstName: { [Op.iLike]: `%${search}%` } },
+      { lastName: { [Op.iLike]: `%${search}%` } },
+    ];
+  }
+  return User.findAndCountAll({
+    where,
+    order: [['lastActiveAt', 'DESC NULLS LAST'], ['createdAt', 'DESC']],
+    limit,
+  });
+}
+```
+
+**ADR (21B-1): ILIKE on three fields, OR-joined, no fuzzy matching** — Postgres ILIKE is fast on indexed columns; trigram / fuzzy search is overkill for member counts in the hundreds. If a workspace ever exceeds 10K members, revisit. Emails get an index already from auth lookups; first/last names get composite GIN trigram index in 21B's migration if explain plan shows seq scan.
+
+**ADR (21B-2): Empty search returns recent members, not "type to search"** — empty input is the default state when the picker opens. Showing "Type a name..." with no list feels slow. Returning the most-recent 50 lets users click without typing in small workspaces.
+
+**ColumnEditor `person` case rewrite:**
+
+```ts
+case 'person': {
+  const allowMultiple = column.config?.allow_multiple === true;
+  const [search, setSearch] = useState('');
+  const [members, setMembers] = useState<User[]>([]);
+  const debouncedSearch = useDebounce(search, 300);
+  const currentAssignees: User[] = allowMultiple
+    ? (Array.isArray(value) ? value : [])
+    : (value ? [value] : []);
+
+  useEffect(() => {
+    api.workspaces.searchMembers(workspaceId, debouncedSearch).then((res) => {
+      if (res.success && res.data) {
+        setMembers(res.data.members);
+      }
+    });
+  }, [debouncedSearch, workspaceId]);
+
+  // ... render search input + member list + chip stack for current assignees
+}
+```
+
+`useDebounce` is a 6-line custom hook in `_shared/src/hooks/useDebounce.ts` (new). Cancels pending timeouts on unmount.
+
+**Single vs multi-assign UX:**
+- `allow_multiple === false` (default): clicking a member replaces the cell value. Click outside / Escape closes the picker without saving.
+- `allow_multiple === true`: clicking a member adds to the chip stack. X button on each chip removes. "Clear all" link below the chips.
+
+**Avatar fallback:**
+- If `user.avatar` is set, render `<img src={avatar}>`.
+- Otherwise, render `<PersonAvatar>` (existing shared component) which generates initials + a hash-derived color.
+
+**Open questions — recommended answers:**
+1. **Multi-assign max?** → **20 per column.** Soft cap; UI stops adding when limit reached + shows toast.
+2. **Search across deactivated users?** → **No.** Backend filters `where: { isActive: true }`. Deactivated users stay assigned (don't break existing assignments) but aren't searchable.
+3. **Inline-create new member from picker?** → **No.** Slice 22 scope; current admin-only invite flow stays.
+4. **Self-assign visible?** → **Yes.** No special handling — current user appears in results like anyone else.
+
+**Acceptance criteria (21B):**
+- [ ] `GET /workspaces/:id/members` endpoint returns 50 recent members on empty search; ILIKE filtered on non-empty
+- [ ] Foreign workspace request → 403
+- [ ] Unauthenticated → 401
+- [ ] ColumnEditor person case shows search input + 50 most-recent members on open
+- [ ] 300ms debounce on input; pending requests are cancelled when a newer one fires
+- [ ] Single-assign click replaces value; multi-assign click adds chip
+- [ ] Click outside / Escape closes picker
+- [ ] PersonAvatar fallback renders when `user.avatar` is null
+- [ ] WS echo: tab B sees re-assignment within 2s
+- [ ] Viewer role: cell renders read-only avatar(s); no picker opens on click
+
+**Files touched (≤7):**
+- `backend/src/routes/workspaces.ts` (modify — add member-search route)
+- `backend/src/services/WorkspaceService.ts` (modify — add `searchMembers`)
+- `backend/src/__tests__/routes/workspaces.test.ts` (modify — 5 new test cases)
+- `frontends/_shared/src/utils/api.ts` (modify — `api.workspaces.searchMembers`)
+- `frontends/_shared/src/hooks/useDebounce.ts` (new)
+- `frontends/_shared/src/components/board/ColumnEditor.tsx` (modify — person case rewrite)
+- `frontends/_shared/src/__tests__/ColumnEditor.person.test.tsx` (new — 5 cases)
+- `frontends/_shared/src/__tests__/api.workspaces.test.ts` (new — 4 cases)
+- `e2e/specs/slice-21/person-picker.spec.ts` (new — 3 cases × 3 industries = 9 tests)
+
+**Boundaries:**
+- Always: scope `WorkspaceService.searchMembers` by `workspaceId` (cross-workspace search would leak member lists).
+- Always: filter `isActive: true` (deactivated users not searchable).
+- Ask first: lifting the multi-assign cap above 20 (UX feels cluttered above that).
+- Never: return passwordHash, refreshToken, or any sensitive User fields. Use `attributes: ['id','email','firstName','lastName','avatar','role']`.
+- Never: search across workspaces — no global member directory.
+
+---
+
+##### Slice 21C: Bulk actions (Size: M)
+
+**Objective:** Add multi-row selection to TableView (checkbox column + Select-all + shift-click range + Cmd/Ctrl-click toggle). Render a floating BulkActionBar at the bottom when ≥1 row is selected. Actions: Delete (confirm), Change Status (no confirm), Assign (no confirm). Each action calls `Promise.all(useBoard.deleteItem | updateItemValue)` over selected IDs.
+
+**Selection state shape (TableView):**
+
+```ts
+const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+const [lastClickedId, setLastClickedId] = useState<number | null>(null);
+```
+
+**Click semantics:**
+- **Click without modifiers** → replace selection: `selectedIds = new Set([itemId])`, `lastClickedId = itemId`
+- **Cmd/Ctrl+click** → toggle: if id in set, remove; else add. Update `lastClickedId`.
+- **Shift+click** → range select: from `lastClickedId` (inclusive) to `itemId` (inclusive) — adds the range to existing selection (Shift doesn't replace).
+- **Click on row** (not the checkbox) → also triggers selection (Excel/Linear convention)
+- **Click on a cell that's edit-eligible** → starts edit, doesn't change selection. Selection only triggers from row whitespace + checkbox + name cell.
+- **Escape** → `selectedIds.clear()`. Focus stays on Table.
+- **Header checkbox** → toggle: if all visible items selected, clear; else add all visible to selection.
+
+**ADR (21C-1): Visible-only "Select all"** — header checkbox selects items currently rendered (post-filter, post-search), not the entire underlying dataset. Selecting 100K hidden items is a footgun. If a user wants "all", they remove filters first.
+
+**ADR (21C-2): Multi-group selection allowed** — selection can span multiple groups in TableView (Items A, B from group 1 and items C, D from group 2 selected together). Bulk actions apply to the selection regardless of group boundary.
+
+**ADR (21C-3): Selection survives sort but NOT filter changes** — re-sorting keeps the selection (same items, different visual order). Adding/removing a filter clears the selection (the rows that defined the selection may be hidden).
+
+**`<BulkActionBar>` component (`@crm/shared/src/components/board/BulkActionBar.tsx`):**
+
+```ts
+interface BulkActionBarProps {
+  selectedIds: Set<number>;
+  board: Board;
+  items: Item[];
+  onClear: () => void;
+  // Mutations come from useBoard (RBAC-gated by parent)
+  onBulkDelete?: (ids: number[]) => Promise<void>;
+  onBulkUpdateStatus?: (ids: number[], statusValue: { label: string; color: string }) => Promise<void>;
+  onBulkAssign?: (ids: number[], columnId: number, userIds: number[]) => Promise<void>;
+}
+```
+
+Renders bottom-fixed bar:
+- Left: "{N} selected" + "Clear" link
+- Center: action buttons (Delete / Change status ↓ / Assign ↓)
+- Right: nothing (room for future actions)
+
+Action handlers wire to `Promise.all`:
+
+```ts
+async function handleBulkDelete() {
+  if (!onBulkDelete) return;
+  const ids = Array.from(selectedIds);
+  setConfirmOpen(false);
+  await onBulkDelete(ids);  // useBoard.deleteItem × N internally
+  onClear();
+}
+```
+
+`useBoard` exposes a thin `bulkDelete(ids: number[])` that does `Promise.all(ids.map(deleteItem))`. Ditto `bulkUpdateValue` and `bulkAssign`. Each per-item mutation is the same one Slice 20.5 wired — optimistic update + rollback per item, toast aggregated ("3 of 7 items couldn't be deleted").
+
+**Confirmation:**
+- Delete: `<ConfirmDialog title="Delete N items?" description="This cannot be undone." variant="danger" />` — reuses B1's component.
+- Change status: no confirm. Status dropdown opens inline.
+- Assign: no confirm. Person picker opens inline (reuses 21B's picker).
+
+**Open questions — recommended answers:**
+1. **Mixed status-options across items?** → **Show union of options.** If item A has Status options [New, Done] and item B has [Open, Closed], the bulk picker shows all 4. Some items will have unmatched values after — fine, that's how Status columns already behave.
+2. **Bulk assign: only Person columns or also Status?** → **Person columns only.** "Assign" is a Person-specific action; status changes are "Change status".
+3. **Action bar position: bottom or top?** → **Bottom.** Stays out of the way of the table data; matches Linear / Notion convention.
+4. **Keyboard shortcut for delete?** → **No.** Delete-key bulk delete is a footgun; users must click. Cmd+A select-all is fine to add later.
+
+**Acceptance criteria (21C):**
+- [ ] Click a row (no modifier) → selects only that row
+- [ ] Cmd/Ctrl+click → toggles row in/out of selection
+- [ ] Shift+click → range-selects from lastClickedId to current
+- [ ] Header checkbox → toggles select-all-visible
+- [ ] Escape → clears selection
+- [ ] BulkActionBar appears when ≥1 row selected; disappears at 0
+- [ ] Bulk delete shows ConfirmDialog with "Delete N items?"
+- [ ] Bulk status-change applies to all selected with no confirm
+- [ ] Filter change clears selection (per ADR 21C-3)
+- [ ] Sort change preserves selection (per ADR 21C-3)
+- [ ] WS echo: tab B observes N row removals within 2s (per-item, not batched)
+- [ ] Viewer role: no checkboxes, no action bar (gated by `useCanEdit().canDelete` + `.canEditInline`)
+
+**Files touched (≤7):**
+- `frontends/_shared/src/components/board/TableView.tsx` (modify — multi-select state + click handlers)
+- `frontends/_shared/src/components/board/BulkActionBar.tsx` (new)
+- `frontends/_shared/src/components/board/BoardView.tsx` (modify — pass mutations + canEdit to TableView/BulkActionBar)
+- `frontends/_shared/src/hooks/useBoard.ts` (modify — add `bulkDelete`/`bulkUpdateValue`/`bulkAssign`)
+- `frontends/_shared/src/__tests__/TableView.multiselect.test.tsx` (new — 8 cases)
+- `frontends/_shared/src/__tests__/BulkActionBar.test.tsx` (new — 6 cases)
+- `e2e/specs/slice-21/bulk-actions.spec.ts` (new — 3 cases × 3 industries = 9 tests)
+
+**Boundaries:**
+- Always: gate via `useCanEdit().canDelete` for the bulk delete action; `.canEditInline` for status/assign.
+- Always: clear selection on filter change (rows might no longer exist).
+- Ask first: adding more bulk actions (move-to-group, duplicate) — those are Slice 23 scope.
+- Never: send a single backend bulk request — `Promise.all` over per-item routes only (per parent ADR).
+- Never: persist selection in localStorage — selection is ephemeral per session, per board.
+
+---
+
 ## Success Criteria
 
 - [ ] All 18 vertical slices implemented and working
