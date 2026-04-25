@@ -45,6 +45,11 @@ export interface IndustryFixture {
   brandColor: string;
 }
 
+// Slice 20B B1-1: expanded from 3 → 10 entries in port order.
+// All 10 industries now have @crm/shared integrated, BoardPage migrated to
+// the shared BoardView, ToastProvider mounted at app root, and an admin-
+// only "New Board" dialog in OverviewDashboard. The Phase D specs iterate
+// over this list unchanged (see selectedIndustries() below).
 export const SLICE_20_INDUSTRIES: IndustryFixture[] = [
   {
     slug: 'novapay',
@@ -65,6 +70,42 @@ export const SLICE_20_INDUSTRIES: IndustryFixture[] = [
     brandColor: '#059669',
   },
   {
+    slug: 'trustguard',
+    baseURL: 'http://localhost:13003',
+    adminEmail: 'admin@trustguard.com',
+    adminPassword: 'demo123',
+    primaryBoardName: 'Claims Pipeline',
+    tokenKey: 'trustguard_token',
+    brandColor: '#1E3A5F',
+  },
+  {
+    slug: 'urbannest',
+    baseURL: 'http://localhost:13004',
+    adminEmail: 'admin@urbannest.com',
+    adminPassword: 'demo123',
+    primaryBoardName: 'Lead Pipeline',
+    tokenKey: 'urbannest_token',
+    brandColor: '#D97706',
+  },
+  {
+    slug: 'swiftroute',
+    baseURL: 'http://localhost:13005',
+    adminEmail: 'admin@swiftroute.com',
+    adminPassword: 'demo123',
+    primaryBoardName: 'Shipment Tracker',
+    tokenKey: 'swiftroute_token',
+    brandColor: '#7C3AED',
+  },
+  {
+    slug: 'dentaflow',
+    baseURL: 'http://localhost:13006',
+    adminEmail: 'admin@dentaflow.com',
+    adminPassword: 'demo123',
+    primaryBoardName: 'Patient Pipeline',
+    tokenKey: 'dentaflow_token',
+    brandColor: '#06B6D4',
+  },
+  {
     slug: 'jurispath',
     baseURL: 'http://localhost:13007',
     adminEmail: 'admin@jurispath.com',
@@ -72,6 +113,33 @@ export const SLICE_20_INDUSTRIES: IndustryFixture[] = [
     primaryBoardName: 'Case Management',
     tokenKey: 'jurispath_token',
     brandColor: '#166534',
+  },
+  {
+    slug: 'tablesync',
+    baseURL: 'http://localhost:13008',
+    adminEmail: 'admin@tablesync.com',
+    adminPassword: 'demo123',
+    primaryBoardName: 'Reservation Board',
+    tokenKey: 'tablesync_token',
+    brandColor: '#9F1239',
+  },
+  {
+    slug: 'cranestack',
+    baseURL: 'http://localhost:13009',
+    adminEmail: 'admin@cranestack.com',
+    adminPassword: 'demo123',
+    primaryBoardName: 'Project Pipeline',
+    tokenKey: 'cranestack_token',
+    brandColor: '#EA580C',
+  },
+  {
+    slug: 'edupulse',
+    baseURL: 'http://localhost:13010',
+    adminEmail: 'admin@edupulse.com',
+    adminPassword: 'demo123',
+    primaryBoardName: 'Student Enrollment',
+    tokenKey: 'edupulse_token',
+    brandColor: '#6D28D9',
   },
 ];
 

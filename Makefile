@@ -84,7 +84,9 @@ test-shared:
 #   6. `down -v` teardown before moving to the next industry
 #
 # Individual slugs can be exercised via `make e2e-slice-20 SLUGS=novapay`.
-SLUGS ?= novapay medvista jurispath
+# Slice 20B B1-2: expanded from 3 → 10 slugs in port order. All 10 industries
+# now have CRUD UI wired via shared BoardView + ToastProvider.
+SLUGS ?= novapay medvista trustguard urbannest swiftroute dentaflow jurispath tablesync cranestack edupulse
 e2e-slice-20:
 	@set -e; \
 	for slug in $(SLUGS); do \
