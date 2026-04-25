@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Table, LayoutGrid, Search, Filter } from 'lucide-react';
 import { BoardView } from '@crm/shared/components/board/BoardView';
 import { useToast } from '@crm/shared/components/common/ToastProvider';
+import { useAuth } from '../context/AuthContext';
 import { api } from '../utils/api';
 import type { Board, Item, BoardView as BoardViewType } from '../types';
 
@@ -36,6 +37,16 @@ export function BoardPage({ board, items: propItems, loading }: BoardPageProps) 
   const [searchQuery, setSearchQuery] = useState('');
   const [items, setItems] = useState<Item[]>(propItems);
   const { show: showToast } = useToast();
+  const { user } = useAuth();
+
+  // RBAC gating (Slice 20B C4): viewer role sees zero CRUD affordances.
+  // admin + member get create/edit/delete on items — the shared
+  // BoardView only renders the affordances when the callback props
+  // are defined, so setting them to undefined hides the buttons.
+  // Passing the full callback set for admin/member matches the Slice
+  // 20 RBAC matrix (member's "no board create" is gated inside
+  // OverviewDashboard's create-board trigger, not here).
+  const canItemCrud = user?.role === 'admin' || user?.role === 'member';
 
   // Sync from parent when the selected board changes (App re-fetches).
   useEffect(() => {
@@ -216,9 +227,9 @@ export function BoardPage({ board, items: propItems, loading }: BoardPageProps) 
           board={board as unknown as Parameters<typeof BoardView>[0]['board']}
           items={filteredItems as unknown as Parameters<typeof BoardView>[0]['items']}
           currentView={currentView as unknown as Parameters<typeof BoardView>[0]['currentView']}
-          onItemCreate={handleItemCreate}
-          onItemUpdate={handleItemUpdate}
-          onItemDelete={handleItemDelete}
+          onItemCreate={canItemCrud ? handleItemCreate : undefined}
+          onItemUpdate={canItemCrud ? handleItemUpdate : undefined}
+          onItemDelete={canItemCrud ? handleItemDelete : undefined}
         />
       </div>
 
