@@ -7,6 +7,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      '@crm/shared': path.resolve(__dirname, '../_shared/src'),
     },
   },
   server: {
