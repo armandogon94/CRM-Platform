@@ -1,126 +1,50 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Table, LayoutGrid, Search, Filter } from 'lucide-react';
 import { BoardView } from '@crm/shared/components/board/BoardView';
-import { useToast } from '@crm/shared/components/common/ToastProvider';
+import { useBoard } from '@crm/shared/hooks/useBoard';
 import { useAuth } from '../context/AuthContext';
-import { api } from '../utils/api';
-import type { Board, Item, BoardView as BoardViewType } from '../types';
+import type { BoardView as BoardViewType } from '../types';
 
 interface BoardPageProps {
-  board: Board | null;
-  items: Item[];
-  loading: boolean;
+  boardId: number;
 }
 
 /**
- * TrustGuard state-based board page (Slice 20B C2 CRUD wiring).
+ * TrustGuard board page (Slice 20.5 B — shared useBoard adoption).
  *
- * Symmetric with MedVista's C2 migration: parent App.tsx owns activeView
- * + currentItems and passes `board` + `items` down as props. We mirror
- * propItems into local state via useEffect so we can apply optimistic
- * CRUD updates without threading setters through App.
+ * Replaces the Slice 20B C2 state-mirror + local-CRUD pattern. The shared
+ * useBoard hook now owns: REST fetches for board + items, optimistic
+ * mutations with toast-on-error rollback, WebSocket echo wiring, and
+ * loading/error state. BoardPage is reduced to UI concerns only —
+ * viewMode toggle, search filter, RBAC gating, and prop-bridging into
+ * the shared <BoardView>.
  *
- * C2 migrates from TrustGuard's local KanbanView/BoardTable fork to the
- * shared BoardView. Three CRUD callbacks are wired through to the
- * TrustGuard-local REST client (which uses the `trustguard_token` key
- * convention - we keep the local api rather than shared useBoard for
- * the same reason NovaPay/MedVista did).
- *
- *   - onItemCreate → POST /items (backend assigns groupId)
- *   - onItemUpdate → PUT /items/:id/values (optimistic + rollback)
- *   - onItemDelete → DELETE /items/:id (A2.5 flat shim, optimistic + rollback)
- *
- * Every failure emits a toast via the shared <ToastProvider>.
+ * Token-key alignment is handled at boot in main.tsx via
+ *   configureApi({ tokenKey: 'trustguard_token' })
+ *   configureWebSocket({ tokenKey: 'trustguard_token' })
+ * so this file no longer touches TrustGuard's local api.ts (App.tsx
+ * still uses it for the OverviewDashboard KPI tiles, which read across
+ * all boards).
  */
-export function BoardPage({ board, items: propItems, loading }: BoardPageProps) {
+export function BoardPage({ boardId }: BoardPageProps) {
   const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table');
   const [searchQuery, setSearchQuery] = useState('');
-  const [items, setItems] = useState<Item[]>(propItems);
-  const { show: showToast } = useToast();
   const { user } = useAuth();
+
+  const {
+    board,
+    items,
+    loading,
+    createItem,
+    updateItemValue,
+    deleteItem,
+  } = useBoard(boardId);
 
   // RBAC gating (Slice 20B C4): viewer role sees zero CRUD affordances.
   // admin + member get create/edit/delete on items — the shared
   // BoardView only renders the affordances when the callback props
   // are defined, so setting them to undefined hides the buttons.
-  // Passing the full callback set for admin/member matches the Slice
-  // 20 RBAC matrix (member's "no board create" is gated inside
-  // OverviewDashboard's create-board trigger, not here).
   const canItemCrud = user?.role === 'admin' || user?.role === 'member';
-
-  // Sync from parent when the selected board changes (App re-fetches).
-  useEffect(() => {
-    setItems(propItems);
-  }, [propItems]);
-
-  // ── CRUD handlers threaded to <BoardView> ──────────────────────────
-  const handleItemCreate = useCallback(
-    async (groupId: number, name: string) => {
-      if (!board) return;
-      const res = await api.createItem({ boardId: board.id, groupId, name });
-      if (res.success && res.data?.item) {
-        setItems((prev) => [...prev, res.data!.item as Item]);
-      } else {
-        showToast({
-          variant: 'error',
-          title: 'Could not create item',
-          description: res.error ?? 'Please try again.',
-        });
-      }
-    },
-    [board, showToast]
-  );
-
-  const handleItemUpdate = useCallback(
-    async (itemId: number, columnId: number, value: unknown) => {
-      // Optimistic update — write locally, roll back on error.
-      const snapshot = items;
-      setItems((prev) =>
-        prev.map((it) => {
-          if (it.id !== itemId) return it;
-          const cvs = it.columnValues ?? [];
-          const idx = cvs.findIndex((c) => c.columnId === columnId);
-          const nextCvs =
-            idx >= 0
-              ? cvs.map((c) =>
-                  c.columnId === columnId ? { ...c, value } : c
-                )
-              : [
-                  ...cvs,
-                  { id: -1, itemId, columnId, value } as (typeof cvs)[number],
-                ];
-          return { ...it, columnValues: nextCvs };
-        })
-      );
-      const res = await api.updateColumnValues(itemId, [{ columnId, value }]);
-      if (!res.success) {
-        setItems(snapshot);
-        showToast({
-          variant: 'error',
-          title: 'Could not update value',
-          description: res.error ?? 'Please try again.',
-        });
-      }
-    },
-    [items, showToast]
-  );
-
-  const handleItemDelete = useCallback(
-    async (itemId: number) => {
-      const snapshot = items;
-      setItems((prev) => prev.filter((i) => i.id !== itemId));
-      const res = await api.deleteItem(itemId);
-      if (!res.success) {
-        setItems(snapshot);
-        showToast({
-          variant: 'error',
-          title: 'Could not delete item',
-          description: res.error ?? 'Please try again.',
-        });
-      }
-    },
-    [items, showToast]
-  );
 
   // Shared BoardView expects a `currentView: BoardView` prop matching the
   // selected UI mode — synthesise one from local viewMode state rather
@@ -219,17 +143,21 @@ export function BoardPage({ board, items: propItems, loading }: BoardPageProps) 
         </div>
       </div>
 
-      {/* Board Content — Slice 20B C2 uses shared BoardView so CRUD
-          affordances (inline + Add item / kebab delete / inline edit)
-          are consistent with every industry migration. */}
+      {/* Board Content — shared BoardView with useBoard mutations wired
+          through. createItem signature is { groupId, name } object form;
+          the BoardView callback shape is (groupId, name) so we adapt. */}
       <div className="card p-4">
         <BoardView
-          board={board as unknown as Parameters<typeof BoardView>[0]['board']}
-          items={filteredItems as unknown as Parameters<typeof BoardView>[0]['items']}
+          board={board}
+          items={filteredItems}
           currentView={currentView as unknown as Parameters<typeof BoardView>[0]['currentView']}
-          onItemCreate={canItemCrud ? handleItemCreate : undefined}
-          onItemUpdate={canItemCrud ? handleItemUpdate : undefined}
-          onItemDelete={canItemCrud ? handleItemDelete : undefined}
+          onItemCreate={
+            canItemCrud
+              ? (groupId: number, name: string) => createItem({ groupId, name })
+              : undefined
+          }
+          onItemUpdate={canItemCrud ? updateItemValue : undefined}
+          onItemDelete={canItemCrud ? deleteItem : undefined}
         />
       </div>
 
