@@ -1,4 +1,4 @@
-import type { ApiResponse, Item, Board, ColumnValue } from '../types/index';
+import type { ApiResponse, Item, Board, ColumnValue, User } from '../types/index';
 
 // Configurable settings — can be overridden per industry frontend via configureApi()
 let _baseUrl = '/api/v1';
@@ -80,7 +80,8 @@ export function uploadWithProgress<T = unknown>(
 async function request<T>(
   method: string,
   url: string,
-  data?: any
+  data?: any,
+  options?: { signal?: AbortSignal }
 ): Promise<ApiResponse<T>> {
   const token = getAuthToken();
 
@@ -97,6 +98,7 @@ async function request<T>(
       method,
       headers,
       body: data !== undefined ? JSON.stringify(data) : undefined,
+      signal: options?.signal,
     });
 
     if (res.status === 401) {
@@ -173,6 +175,33 @@ export interface FileAttachment {
 export interface UploadFileOptions {
   itemId: number;
   columnValueId?: number;
+}
+
+/**
+ * Slice 21B B1: backend-locked allowlist for member-search responses.
+ * Mirrors `attributes: ['id','email','firstName','lastName','avatar','role']`
+ * in WorkspaceService.searchMembers — no `passwordHash` / `refreshToken`
+ * leak by construction.
+ */
+export type Member = Pick<User, 'id' | 'email' | 'firstName' | 'lastName' | 'avatar' | 'role'>;
+
+export interface SearchMembersPagination {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface SearchMembersOptions {
+  /** Hard cap defaults to 50 server-side; pass to override (e.g. 20 for inline pickers). */
+  limit?: number;
+  /**
+   * AbortSignal so debounced consumers can cancel a stale in-flight request
+   * when a newer keystroke fires. Pairs with `useDebounce` — debouncing
+   * only cancels pending timers, not the request the previous timer
+   * already kicked off.
+   */
+  signal?: AbortSignal;
 }
 
 export const api = {
@@ -261,6 +290,35 @@ export const api = {
 
     delete(fileId: number): Promise<ApiResponse<null>> {
       return request<null>('DELETE', `/files/${fileId}`);
+    },
+  },
+
+  // ── Workspace member search (Slice 21B B1) ──────────────────────────
+  // Thin typed wrapper over GET /workspaces/:id/members. Empty `search`
+  // hits the backend recents-50 path; non-empty appends ?search=... so
+  // the backend ILIKEs over email + firstName + lastName.
+  //
+  // The optional `signal` lets debounced callers (see useDebounce)
+  // abort stale in-flight requests when a newer keystroke fires —
+  // debouncing only cancels pending timers, not the request the
+  // previous timer already kicked off.
+  workspaces: {
+    searchMembers(
+      workspaceId: number,
+      search: string,
+      options?: SearchMembersOptions
+    ): Promise<ApiResponse<{ members: Member[] }>> {
+      const params = new URLSearchParams();
+      if (search.length > 0) params.set('search', search);
+      if (options?.limit !== undefined) params.set('limit', String(options.limit));
+      const query = params.toString();
+      const url = query
+        ? `/workspaces/${workspaceId}/members?${query}`
+        : `/workspaces/${workspaceId}/members`;
+
+      return request<{ members: Member[] }>('GET', url, undefined, {
+        signal: options?.signal,
+      });
     },
   },
 };
