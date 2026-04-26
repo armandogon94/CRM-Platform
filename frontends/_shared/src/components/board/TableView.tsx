@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -29,6 +29,15 @@ interface TableViewProps {
   onItemUpdate?: (itemId: number, columnId: number, value: any) => void;
   onItemCreate?: (groupId: number, name: string) => void;
   onItemDelete?: (itemId: number) => void;
+  /**
+   * Optional opaque signal that changes when the parent's filter/search
+   * input changes. When this value changes, TableView clears its
+   * selection per ADR 21C-3 ("filter clears, sort preserves"). Sort
+   * changes should NOT alter `filterKey` — only filter/search inputs.
+   * Phase D (BoardView wiring) will pass this; Phase B leaves it
+   * optional so existing callers compile unchanged.
+   */
+  filterKey?: string | number;
 }
 
 const columnTypeIcons: Record<string, React.ElementType> = {
@@ -59,11 +68,67 @@ interface EditingCell {
   columnId: number;
 }
 
+type ClickModifiers = {
+  shift: boolean;
+  meta: boolean; // Cmd on macOS, Ctrl on others
+};
+
+/**
+ * Pure selection reducer per SPEC §Slice 21C click matrix.
+ *
+ * - Bare click: replace selection with [clickedId]; lastClickedId = clickedId.
+ * - Cmd/Ctrl+click: toggle clickedId in/out of set; lastClickedId = clickedId.
+ * - Shift+click: range from lastClickedId..clickedId (inclusive) against
+ *   the current visible-id order; ADDS to existing selection.
+ *   If lastClickedId is null, behaves like a bare click.
+ *
+ * `visibleIds` is the rendered item-id order (post-filter, post-sort,
+ * post-group), so the Shift range matches what the user sees.
+ */
+export function computeNextSelection(
+  prev: Set<number>,
+  clickedId: number,
+  modifiers: ClickModifiers,
+  lastClickedId: number | null,
+  visibleIds: number[]
+): { next: Set<number>; nextLastClickedId: number } {
+  if (modifiers.shift && lastClickedId !== null) {
+    const startIdx = visibleIds.indexOf(lastClickedId);
+    const endIdx = visibleIds.indexOf(clickedId);
+    if (startIdx !== -1 && endIdx !== -1) {
+      const [from, to] = startIdx <= endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+      const next = new Set(prev);
+      for (let i = from; i <= to; i++) {
+        next.add(visibleIds[i]);
+      }
+      // Shift extends but does NOT re-anchor lastClickedId per spec
+      return { next, nextLastClickedId: lastClickedId };
+    }
+  }
+
+  if (modifiers.meta) {
+    const next = new Set(prev);
+    if (next.has(clickedId)) {
+      next.delete(clickedId);
+    } else {
+      next.add(clickedId);
+    }
+    return { next, nextLastClickedId: clickedId };
+  }
+
+  // Bare click — replace
+  return { next: new Set([clickedId]), nextLastClickedId: clickedId };
+}
+
 function GroupSection({
   group,
   columns,
   items,
   editingCell,
+  selectedIds,
+  onRowClick,
+  onCheckboxClick,
+  onHeaderToggle,
   onCellClick,
   onCellChange,
   onCellBlur,
@@ -73,6 +138,10 @@ function GroupSection({
   columns: Column[];
   items: Item[];
   editingCell: EditingCell | null;
+  selectedIds: Set<number>;
+  onRowClick: (itemId: number, e: React.MouseEvent) => void;
+  onCheckboxClick: (itemId: number, e: React.MouseEvent) => void;
+  onHeaderToggle: (groupItemIds: number[]) => void;
   onCellClick: (itemId: number, columnId: number) => void;
   onCellChange: (itemId: number, columnId: number, value: any) => void;
   onCellBlur: () => void;
@@ -81,6 +150,9 @@ function GroupSection({
   const [collapsed, setCollapsed] = useState(false);
   const [newItemName, setNewItemName] = useState('');
   const groupItems = items.filter((i) => i.groupId === group.id);
+  const groupItemIds = groupItems.map((i) => i.id);
+  const allSelected =
+    groupItemIds.length > 0 && groupItemIds.every((id) => selectedIds.has(id));
 
   function handleAddItem() {
     if (!newItemName.trim() || !onItemCreate) return;
@@ -117,8 +189,20 @@ function GroupSection({
             <thead>
               <tr>
                 <th
-                  className="py-2 px-3 text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50 sticky left-0 z-10 min-w-[220px] border-b border-gray-200"
+                  className="py-2 px-3 text-xs font-medium text-gray-500 bg-gray-50 sticky left-0 z-10 border-b border-gray-200 w-10"
                   style={{ borderLeft: `3px solid ${group.color}` }}
+                >
+                  <input
+                    type="checkbox"
+                    data-testid="header-checkbox"
+                    aria-label={`Select all visible items in ${group.name}`}
+                    checked={allSelected}
+                    onChange={() => onHeaderToggle(groupItemIds)}
+                    className="cursor-pointer"
+                  />
+                </th>
+                <th
+                  className="py-2 px-3 text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50 sticky left-10 z-10 min-w-[220px] border-b border-gray-200"
                 >
                   Item
                 </th>
@@ -140,54 +224,83 @@ function GroupSection({
               </tr>
             </thead>
             <tbody>
-              {groupItems.map((item) => (
-                <tr
-                  key={item.id}
-                  className="border-b border-gray-100 hover:bg-blue-50/30 transition-colors group/row"
-                >
-                  <td
-                    className="py-2.5 px-3 text-sm font-medium text-gray-900 bg-white sticky left-0 z-10 group-hover/row:bg-blue-50/30"
-                    style={{ borderLeft: `3px solid ${group.color}` }}
+              {groupItems.map((item) => {
+                const isSelected = selectedIds.has(item.id);
+                return (
+                  <tr
+                    key={item.id}
+                    data-testid={`row-${item.id}`}
+                    data-selected={isSelected ? 'true' : 'false'}
+                    onClick={(e) => onRowClick(item.id, e)}
+                    className={`border-b border-gray-100 transition-colors group/row ${
+                      isSelected ? 'bg-blue-50' : 'hover:bg-blue-50/30'
+                    }`}
                   >
-                    {item.name}
-                  </td>
-                  {columns.map((col) => {
-                    const isEditing =
-                      editingCell?.itemId === item.id && editingCell?.columnId === col.id;
-                    const cellValue = getValueForColumn(item, col.id);
-
-                    return (
-                      <td
-                        key={col.id}
-                        className={`py-2.5 px-3 ${
-                          isEditing ? '' : 'cursor-pointer hover:bg-blue-50/50'
-                        }`}
-                        onClick={() => {
-                          if (!isEditing && col.columnType !== 'formula') {
-                            onCellClick(item.id, col.id);
-                          }
+                    <td
+                      className="py-2.5 px-3 bg-white sticky left-0 z-10 group-hover/row:bg-blue-50/30 w-10"
+                      style={{ borderLeft: `3px solid ${group.color}` }}
+                    >
+                      <input
+                        type="checkbox"
+                        data-testid={`row-checkbox-${item.id}`}
+                        aria-label={`Select ${item.name}`}
+                        checked={isSelected}
+                        onChange={() => {
+                          /* state owned by row click handler */
                         }}
-                      >
-                        {isEditing ? (
-                          <ColumnEditor
-                            column={col}
-                            value={cellValue}
-                            onChange={(newValue) => onCellChange(item.id, col.id, newValue)}
-                            onBlur={onCellBlur}
-                          />
-                        ) : (
-                          <ColumnRenderer column={col} value={cellValue} compact />
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+                        onClick={(e) => onCheckboxClick(item.id, e)}
+                        className="cursor-pointer"
+                      />
+                    </td>
+                    <td
+                      className="py-2.5 px-3 text-sm font-medium text-gray-900 bg-white sticky left-10 z-10 group-hover/row:bg-blue-50/30"
+                    >
+                      {item.name}
+                    </td>
+                    {columns.map((col) => {
+                      const isEditing =
+                        editingCell?.itemId === item.id && editingCell?.columnId === col.id;
+                      const cellValue = getValueForColumn(item, col.id);
+
+                      return (
+                        <td
+                          key={col.id}
+                          data-testid={`cell-${col.columnType}`}
+                          className={`py-2.5 px-3 ${
+                            isEditing ? '' : 'cursor-pointer hover:bg-blue-50/50'
+                          }`}
+                          onClick={(e) => {
+                            // Cell content click → edit, NOT select. Stop the
+                            // bubble so the row-click selection handler doesn't
+                            // see it (ADR 21C: edit-eligible cells preserve
+                            // existing selection).
+                            e.stopPropagation();
+                            if (!isEditing && col.columnType !== 'formula') {
+                              onCellClick(item.id, col.id);
+                            }
+                          }}
+                        >
+                          {isEditing ? (
+                            <ColumnEditor
+                              column={col}
+                              value={cellValue}
+                              onChange={(newValue) => onCellChange(item.id, col.id, newValue)}
+                              onBlur={onCellBlur}
+                            />
+                          ) : (
+                            <ColumnRenderer column={col} value={cellValue} compact />
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
 
               {onItemCreate && (
                 <tr className="border-b border-gray-100">
                   <td
-                    colSpan={columns.length + 1}
+                    colSpan={columns.length + 2}
                     className="py-1.5 px-3"
                     style={{ borderLeft: '3px solid transparent' }}
                   >
@@ -229,10 +342,59 @@ function GroupSection({
   );
 }
 
-export function TableView({ board, items, onItemUpdate, onItemCreate, onItemDelete: _onItemDelete }: TableViewProps) {
+export function TableView({
+  board,
+  items,
+  onItemUpdate,
+  onItemCreate,
+  onItemDelete: _onItemDelete,
+  filterKey,
+}: TableViewProps) {
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [lastClickedId, setLastClickedId] = useState<number | null>(null);
+
   const columns = (board.columns || []).sort((a, b) => a.position - b.position);
   const groups = (board.groups || []).sort((a, b) => a.position - b.position);
+
+  // Visible-id order matches render order: groups in position order, items
+  // within each group in their array order. This is the basis for Shift+click
+  // ranges and for the header checkbox's "select all visible" set.
+  const visibleIds = useMemo(() => {
+    const ids: number[] = [];
+    for (const g of groups) {
+      for (const it of items) {
+        if (it.groupId === g.id) ids.push(it.id);
+      }
+    }
+    return ids;
+  }, [groups, items]);
+
+  // ADR 21C-3: filter change clears selection. Sort change preserves it.
+  // We use a ref to skip the initial mount so an unset filterKey doesn't
+  // wipe selection on first render.
+  const lastFilterKey = useRef<string | number | undefined>(filterKey);
+  useEffect(() => {
+    if (lastFilterKey.current !== filterKey) {
+      lastFilterKey.current = filterKey;
+      setSelectedIds(new Set());
+      setLastClickedId(null);
+    }
+  }, [filterKey]);
+
+  // ADR: Escape clears selection. Listener only attaches when there's
+  // something to clear — avoids global keystroke pollution per plan OQ #2.
+  useEffect(() => {
+    if (selectedIds.size === 0) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setSelectedIds(new Set());
+        setLastClickedId(null);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedIds.size]);
 
   const handleCellClick = useCallback((itemId: number, columnId: number) => {
     setEditingCell({ itemId, columnId });
@@ -247,6 +409,58 @@ export function TableView({ board, items, onItemUpdate, onItemCreate, onItemDele
 
   const handleCellBlur = useCallback(() => {
     setEditingCell(null);
+  }, []);
+
+  const applyClick = useCallback(
+    (itemId: number, e: React.MouseEvent | React.KeyboardEvent) => {
+      const modifiers: ClickModifiers = {
+        shift: e.shiftKey,
+        meta: e.metaKey || e.ctrlKey,
+      };
+      setSelectedIds((prev) => {
+        const { next, nextLastClickedId } = computeNextSelection(
+          prev,
+          itemId,
+          modifiers,
+          lastClickedId,
+          visibleIds
+        );
+        setLastClickedId(nextLastClickedId);
+        return next;
+      });
+    },
+    [lastClickedId, visibleIds]
+  );
+
+  const handleRowClick = useCallback(
+    (itemId: number, e: React.MouseEvent) => {
+      applyClick(itemId, e);
+    },
+    [applyClick]
+  );
+
+  const handleCheckboxClick = useCallback(
+    (itemId: number, e: React.MouseEvent) => {
+      // Checkbox click should behave like a row click but NOT bubble to the
+      // row's onClick (which would re-fire the same logic).
+      e.stopPropagation();
+      applyClick(itemId, e);
+    },
+    [applyClick]
+  );
+
+  const handleHeaderToggle = useCallback((groupItemIds: number[]) => {
+    setSelectedIds((prev) => {
+      const allSelected =
+        groupItemIds.length > 0 && groupItemIds.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const id of groupItemIds) next.delete(id);
+      } else {
+        for (const id of groupItemIds) next.add(id);
+      }
+      return next;
+    });
   }, []);
 
   if (groups.length === 0) {
@@ -266,6 +480,10 @@ export function TableView({ board, items, onItemUpdate, onItemCreate, onItemDele
           columns={columns}
           items={items}
           editingCell={editingCell}
+          selectedIds={selectedIds}
+          onRowClick={handleRowClick}
+          onCheckboxClick={handleCheckboxClick}
+          onHeaderToggle={handleHeaderToggle}
           onCellClick={handleCellClick}
           onCellChange={handleCellChange}
           onCellBlur={handleCellBlur}
