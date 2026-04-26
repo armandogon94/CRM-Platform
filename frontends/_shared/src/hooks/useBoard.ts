@@ -24,6 +24,11 @@ interface CreateItemMutationInput {
   values?: Record<number, unknown>;
 }
 
+interface BulkResult {
+  succeeded: number;
+  failed: number;
+}
+
 interface UseBoardReturn {
   board: Board | null;
   items: Item[];
@@ -37,9 +42,29 @@ interface UseBoardReturn {
   totalPages: number;
   // Mutations (Slice 20 A3) — callers get stable references + toast-on-error
   // so the industry App shells can thread these through without boilerplate.
+  // updateItemValue / deleteItem resolve `true` on server success and
+  // `false` on server failure (after rolling back + emitting their own
+  // per-item toast). Slice 20 callers ignore the return; Slice 21C bulk
+  // wrappers consume it for aggregate accounting.
   createItem: (input: CreateItemMutationInput) => Promise<void>;
-  updateItemValue: (itemId: number, columnId: number, value: unknown) => Promise<void>;
-  deleteItem: (itemId: number) => Promise<void>;
+  updateItemValue: (itemId: number, columnId: number, value: unknown) => Promise<boolean>;
+  deleteItem: (itemId: number) => Promise<boolean>;
+  // Bulk wrappers (Slice 21C A1) — fan Promise.all over the per-item
+  // mutations above. Per-item optimistic update + rollback + toast still
+  // fire from the underlying mutations; the caller (BulkActionBar) decides
+  // whether to render an aggregate "X of N failed" toast based on the
+  // returned counts. Empty `ids[]` is a no-op (no network, no toast).
+  bulkDelete: (ids: number[]) => Promise<BulkResult>;
+  bulkUpdateValue: (
+    ids: number[],
+    columnId: number,
+    value: unknown
+  ) => Promise<BulkResult>;
+  bulkAssign: (
+    ids: number[],
+    columnId: number,
+    userIds: number[]
+  ) => Promise<BulkResult>;
 }
 
 // Pure state-update helpers (exported for testability)
@@ -344,7 +369,9 @@ export function useBoard(boardId: number): UseBoardReturn {
           title: 'Could not update value',
           description: res.error ?? 'Unknown error',
         });
+        return false;
       }
+      return true;
     },
     [showToast]
   );
@@ -375,9 +402,75 @@ export function useBoard(boardId: number): UseBoardReturn {
           title: 'Could not delete item',
           description: res.error ?? 'Unknown error',
         });
+        return false;
       }
+      return true;
     },
     [showToast]
+  );
+
+  // ── Bulk wrappers (Slice 21C A1) ─────────────────────────────────────
+  //
+  // Architecture (parent ADR §Slice 21 OQ #2 + sub-spec §Slice 21C):
+  //   - No backend bulk endpoint. Each wrapper fans Promise.all over the
+  //     per-item mutations above. HTTP/2 multiplexes the requests; 100-row
+  //     delete is the worst realistic case.
+  //   - Per-item optimistic update + rollback + per-item toast already
+  //     live in the single-item mutations — the wrappers don't duplicate
+  //     that logic. Caller (BulkActionBar) decides whether to render an
+  //     aggregate "X of N failed" toast based on the returned counts.
+  //   - Empty `ids[]` short-circuits with { 0, 0 } so an accidental bulk
+  //     call after the user clears their selection never hits the network.
+
+  // Tally booleans returned by the per-item mutations. Each per-item
+  // mutation resolves true on success / false on failure (and has already
+  // rolled back its own optimistic update + emitted a toast). We use
+  // Promise.all over Promise.allSettled because the per-item mutations
+  // never throw — they convert failures to `false`.
+  const tallyResults = (results: boolean[]): BulkResult => {
+    let succeeded = 0;
+    let failed = 0;
+    for (const ok of results) {
+      if (ok) succeeded += 1;
+      else failed += 1;
+    }
+    return { succeeded, failed };
+  };
+
+  const bulkDelete = useCallback(
+    async (ids: number[]): Promise<BulkResult> => {
+      if (ids.length === 0) return { succeeded: 0, failed: 0 };
+      const results = await Promise.all(ids.map((id) => deleteItem(id)));
+      return tallyResults(results);
+    },
+    [deleteItem]
+  );
+
+  const bulkUpdateValue = useCallback(
+    async (
+      ids: number[],
+      columnId: number,
+      value: unknown
+    ): Promise<BulkResult> => {
+      if (ids.length === 0) return { succeeded: 0, failed: 0 };
+      const results = await Promise.all(
+        ids.map((id) => updateItemValue(id, columnId, value))
+      );
+      return tallyResults(results);
+    },
+    [updateItemValue]
+  );
+
+  const bulkAssign = useCallback(
+    async (
+      ids: number[],
+      columnId: number,
+      userIds: number[]
+    ): Promise<BulkResult> => {
+      // Person-column shape: { userIds: number[] } per Slice 21B picker.
+      return bulkUpdateValue(ids, columnId, { userIds });
+    },
+    [bulkUpdateValue]
   );
 
   return {
@@ -394,5 +487,8 @@ export function useBoard(boardId: number): UseBoardReturn {
     createItem,
     updateItemValue,
     deleteItem,
+    bulkDelete,
+    bulkUpdateValue,
+    bulkAssign,
   };
 }
