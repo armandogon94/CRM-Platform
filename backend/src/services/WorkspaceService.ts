@@ -1,6 +1,20 @@
-import { Transaction } from 'sequelize';
+import { Op, Transaction, literal } from 'sequelize';
 import { sequelize, Workspace, User, Board, ActivityLog } from '../models';
 import { AuthUser } from '../types';
+
+/**
+ * Public-safe attribute allowlist for member search responses.
+ * NEVER include passwordHash, refreshToken, resetToken, or any sensitive User fields.
+ * (Slice 21B-A1 — security boundary.)
+ */
+const MEMBER_SEARCH_ATTRIBUTES = [
+  'id',
+  'email',
+  'firstName',
+  'lastName',
+  'avatar',
+  'role',
+] as const;
 
 export default class WorkspaceService {
   /**
@@ -150,6 +164,51 @@ export default class WorkspaceService {
       await transaction.rollback();
       throw error;
     }
+  }
+
+  /**
+   * Search active members of a workspace (Slice 21B A1).
+   *
+   * Empty `search` → 50 most-recently-active members ordered by `lastLoginAt DESC NULLS LAST`,
+   * fallback `createdAt DESC`. Non-empty → ILIKE on email + firstName + lastName, OR-joined.
+   *
+   * Boundaries:
+   * - ALWAYS scoped to `workspaceId` (caller must enforce that the request's :workspaceId
+   *   matches the auth user's workspaceId; the service trusts what it's handed).
+   * - ALWAYS filters `isActive: true` (deactivated users are not searchable).
+   * - NEVER returns passwordHash / refreshToken / resetToken — strict attributes allowlist.
+   */
+  static async searchMembers(
+    workspaceId: number,
+    search: string,
+    limit: number = 50
+  ): Promise<{ members: User[]; total: number }> {
+    const trimmed = (search || '').trim();
+    const where: Record<string, unknown> = {
+      workspaceId,
+      isActive: true,
+    };
+
+    if (trimmed.length > 0) {
+      const pattern = `%${trimmed}%`;
+      where[Op.or as unknown as string] = [
+        { email: { [Op.iLike]: pattern } },
+        { firstName: { [Op.iLike]: pattern } },
+        { lastName: { [Op.iLike]: pattern } },
+      ];
+    }
+
+    const { rows, count } = await User.findAndCountAll({
+      where,
+      attributes: [...MEMBER_SEARCH_ATTRIBUTES],
+      order: [
+        [literal('"last_login_at" DESC NULLS LAST') as unknown as string],
+        ['createdAt', 'DESC'],
+      ] as never,
+      limit,
+    });
+
+    return { members: rows, total: count };
   }
 
   /**

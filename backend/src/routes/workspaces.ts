@@ -6,6 +6,57 @@ import WorkspaceService from '../services/WorkspaceService';
 
 const router = Router();
 
+// GET /workspaces/:workspaceId/members — Search workspace members (Slice 21B A1)
+//
+// Authorization: req.user.workspaceId must equal :workspaceId (manual scope check —
+// foreign workspace requests get 403). All authenticated roles (admin/member/viewer)
+// may search their own workspace's members so the person picker works for everyone
+// who can be assigned to or read items.
+//
+// Empty `search` → 50 most-recent members. Non-empty → ILIKE on email/first/last.
+// `isActive: true` filter is enforced inside WorkspaceService.searchMembers.
+router.get('/:workspaceId/members', async (req: AuthRequest, res: Response) => {
+  try {
+    const workspaceId = parseInt(req.params.workspaceId as string, 10);
+    if (isNaN(workspaceId)) {
+      return errorResponse(res, 'Invalid workspace ID', 400);
+    }
+
+    if (!req.user || req.user.workspaceId !== workspaceId) {
+      return errorResponse(
+        res,
+        'Access denied. You do not belong to this workspace.',
+        403
+      );
+    }
+
+    const search = typeof req.query.search === 'string' ? req.query.search : '';
+    const rawLimit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 50;
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 50) : 50;
+
+    const { members, total } = await WorkspaceService.searchMembers(
+      workspaceId,
+      search,
+      limit
+    );
+
+    // SPEC §Slice 21B contract: `data: { members: [...] }` + sibling `pagination` block.
+    // The shared `paginatedResponse` helper would write `data: T[]`, so we build the
+    // envelope manually to match the spec shape exactly.
+    const totalPages = limit > 0 ? Math.ceil(total / limit) : 0;
+    return res.status(200).json({
+      success: true,
+      data: { members },
+      message: 'Members retrieved',
+      pagination: { page: 1, limit, total, totalPages },
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Failed to search workspace members';
+    return errorResponse(res, message);
+  }
+});
+
 // GET /workspaces — List all workspaces
 router.get('/', async (req: AuthRequest, res: Response) => {
   try {
