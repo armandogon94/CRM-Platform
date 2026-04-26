@@ -13,6 +13,15 @@ export interface Workspace {
   name: string;
   slug: string;
   description: string | null;
+  /**
+   * Slice 21A C2 — workspace-level storage telemetry surfaced to the
+   * BoardView quota indicator + FileUploader's client-side projection
+   * guard. Optional because legacy workspace payloads may not include
+   * the fields; the indicator hides defensively when either is missing
+   * or `storageLimit` is 0 (avoids divide-by-zero render paths).
+   */
+  storageUsed?: number;
+  storageLimit?: number;
 }
 
 export interface Board {

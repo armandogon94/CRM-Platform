@@ -1,15 +1,26 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Star, X } from 'lucide-react';
 import type { Column } from '../../types/index';
+import { FileUploader } from './FileUploader';
+import type { FileAttachment } from '../../utils/api';
+import { useWorkspace } from '../../context/WorkspaceContext';
 
 interface ColumnEditorProps {
   column: Column;
   value: any;
   onChange: (value: any) => void;
   onBlur?: () => void;
+  /**
+   * Slice 21A C1 — wiring metadata for cell types that need to resolve
+   * back to a server-side row (currently only `files`). Optional so the
+   * existing TableView + FormView call sites (which don't surface item
+   * IDs into the editor) keep typechecking; when omitted, the `files`
+   * case falls back to a read-only render with no upload affordance.
+   */
+  meta?: { itemId: number; columnValueId?: number };
 }
 
-export function ColumnEditor({ column, value, onChange, onBlur }: ColumnEditorProps) {
+export function ColumnEditor({ column, value, onChange, onBlur, meta }: ColumnEditorProps) {
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(null);
 
   useEffect(() => {
@@ -384,6 +395,66 @@ export function ColumnEditor({ column, value, onChange, onBlur }: ColumnEditorPr
             </button>
           ))}
         </div>
+      );
+    }
+
+    case 'files': {
+      // Files cell value is a FileAttachment[]. Normalize null/object
+      // shapes so callers that store `null` for empty cells still render
+      // a coherent empty list rather than crashing on `.map`.
+      const currentFiles: FileAttachment[] = Array.isArray(value)
+        ? (value as FileAttachment[])
+        : value
+        ? [value as FileAttachment]
+        : [];
+
+      // Without `meta` we can't post to the upload route — the route
+      // requires an `itemId`. Render the existing list read-only so
+      // callers like FormView (which precedes item creation) still see
+      // the field; once they pass `meta` the upload UI lights up.
+      if (!meta) {
+        return (
+          <ul className="space-y-1 text-sm" data-testid="file-uploader-readonly">
+            {currentFiles.map((file) => (
+              <li key={file.id} className="px-2 py-1 rounded bg-gray-50">
+                {file.originalName}
+              </li>
+            ))}
+          </ul>
+        );
+      }
+
+      // Quota budget comes from workspace context — surfaces the same
+      // numbers as the BoardView header indicator so the projection
+      // check matches the user's mental model. `storageLimit ?? 0`
+      // means a workspace without quota set blocks uploads, which is
+      // the safer default than letting unbounded uploads through.
+      const ws = useWorkspace().workspace;
+      const workspaceStorage = {
+        used: ws?.storageUsed ?? 0,
+        limit: ws?.storageLimit ?? 0,
+      };
+
+      return (
+        <FileUploader
+          itemId={meta.itemId}
+          columnValueId={meta.columnValueId}
+          files={currentFiles}
+          workspaceStorage={workspaceStorage}
+          onUploaded={(file) => {
+            // Optimistic local update — append the new file to the cell
+            // value and propagate via onChange so the row state
+            // reconciles immediately. The WS `file:created` echo from
+            // Phase D will land the same file shape; useBoard's handler
+            // is idempotent on `id`, so no double-apply.
+            onChange([...currentFiles, file]);
+          }}
+          onDeleted={(fileId) => {
+            // Mirror of onUploaded — filter the deleted id out and let
+            // the WS `file:deleted` echo confirm.
+            onChange(currentFiles.filter((f) => f.id !== fileId));
+          }}
+        />
       );
     }
 
