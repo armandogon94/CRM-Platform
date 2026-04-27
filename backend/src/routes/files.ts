@@ -11,8 +11,19 @@ import Item from '../models/Item';
 import wsService from '../services/WebSocketService';
 import { storageService } from '../services/StorageService';
 
-const ALLOWED_MIME_TYPES = [
-  'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
+// Slice 21 review I2 — `image/svg+xml` REMOVED from the allowlist.
+// SVG is XML; it can embed <script> tags and onload handlers. Because
+// the download route streams the file with the stored mimeType in
+// Content-Type, an uploaded SVG opened via the download URL would
+// execute JavaScript in the workspace's browser origin — a stored
+// XSS vector. If SVG support becomes a product requirement, route
+// it through DOMPurify (server-side sanitisation) or rasterise via
+// `sharp` before storage.
+//
+// Exported so the unit test can assert allowlist membership without
+// exercising the full multer + supertest stack.
+export const ALLOWED_MIME_TYPES = [
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp',
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

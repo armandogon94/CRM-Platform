@@ -190,6 +190,28 @@ describe('File routes', () => {
     });
   });
 
+  describe('ALLOWED_MIME_TYPES (Slice 21 review I2)', () => {
+    it('does NOT allow image/svg+xml — SVG XSS vector kept out of upload allowlist', () => {
+      // The pre-fix allowlist included 'image/svg+xml'. Because the
+      // download route streams the file with the stored mimeType in
+      // Content-Type, an uploaded SVG opened via /files/:id/download
+      // would execute <script> tags in the workspace's browser origin
+      // — a stored XSS. Allowlist is now explicit raster-only.
+      const { ALLOWED_MIME_TYPES } = require('../../routes/files');
+      expect(ALLOWED_MIME_TYPES).not.toContain('image/svg+xml');
+      // Sanity-check we didn't drop the safe raster formats too —
+      // the fix is scoped to SVG only.
+      expect(ALLOWED_MIME_TYPES).toEqual(
+        expect.arrayContaining([
+          'image/jpeg',
+          'image/png',
+          'image/gif',
+          'image/webp',
+        ])
+      );
+    });
+  });
+
   describe('buildContentDisposition (Slice 21 review I1)', () => {
     it('encodes filename with RFC 5987 + sanitises legacy filename for header-injection-safe download', () => {
       // The helper is exported from routes/files.ts so we can unit-test

@@ -34,15 +34,21 @@ import { ConfirmDialog } from '../common/ConfirmDialog';
  * routes still 403 server-side — the UI is just the affordance gate.
  */
 
-// ─── MIME whitelist (mirrors the server-side multer config in
-// backend/src/services/StorageService.ts). Keep in sync if either side
-// changes — drift would let the client allow uploads the server rejects.
+// ─── MIME whitelist (mirrors the server-side allowlist in
+// backend/src/routes/files.ts). Keep in sync if either side changes —
+// drift would let the client allow uploads the server rejects.
 //
-// `image/*` is expressed as a prefix below; the rest are literal MIME
-// strings. Office docs are listed individually because the OOXML format
-// strings are long and copy-paste error-prone.
-const ALLOWED_MIME_PREFIXES = ['image/'] as const;
+// Slice 21 review I2 — image types are listed individually (no
+// `image/*` prefix) so SVG (image/svg+xml) is excluded by construction.
+// SVG is XML and can embed <script> tags; allowing it here would
+// silently let the picker green-light an upload the server now
+// rejects. Listing safe raster formats explicitly keeps the two
+// sides aligned.
 const ALLOWED_MIME_TYPES = new Set<string>([
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
   'application/pdf',
   'text/csv',
   'text/plain',
@@ -55,16 +61,21 @@ const ALLOWED_MIME_TYPES = new Set<string>([
 ]);
 
 function isMimeAllowed(mimeType: string): boolean {
-  if (ALLOWED_MIME_TYPES.has(mimeType)) return true;
-  return ALLOWED_MIME_PREFIXES.some((prefix) => mimeType.startsWith(prefix));
+  return ALLOWED_MIME_TYPES.has(mimeType);
 }
 
 // `accept` attribute on <input type="file"> — browser-level filter shown
 // in the system file picker. The whitelist still runs after the user
 // picks a file (some browsers ignore `accept`, and drag-drop bypasses
 // the picker entirely).
+//
+// Slice 21 review I2 — image MIMEs enumerated individually instead of
+// `image/*` so the system picker doesn't offer SVG to the user.
 const ACCEPT_ATTR = [
-  'image/*',
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
   'application/pdf',
   'text/csv',
   'text/plain',
