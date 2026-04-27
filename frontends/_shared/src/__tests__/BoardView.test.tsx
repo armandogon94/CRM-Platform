@@ -32,6 +32,12 @@ vi.mock('../components/board/DashboardView', () => ({
 vi.mock('../components/board/MapView', () => ({
   MapView: () => <div data-testid="map-view-stub" />,
 }));
+// Slice 21C D — BoardView now mounts BulkActionBar which itself
+// imports lucide-react icons + ConfirmDialog. Stub it so quota tests
+// stay focused on the header surface and don't pull the full bar tree.
+vi.mock('../components/board/BulkActionBar', () => ({
+  BulkActionBar: () => null,
+}));
 
 import { BoardView } from '../components/board/BoardView';
 import type { Board, BoardView as BoardViewType, Item } from '../types/index';
@@ -54,6 +60,22 @@ import type { Board, BoardView as BoardViewType, Item } from '../types/index';
 const mockUseWorkspace = vi.fn();
 vi.mock('../context/WorkspaceContext', () => ({
   useWorkspace: () => mockUseWorkspace(),
+}));
+
+// ── auth mock — Slice 21C D added useCanEdit() inside BoardView so the
+// component reads useAuth() at render time. Quota tests don't care
+// about role; stub a viewer to keep affordances off and avoid pulling
+// the real AuthProvider.
+vi.mock('../context/AuthContext', () => ({
+  useAuth: () => ({
+    user: null,
+    accessToken: null,
+    isAuthenticated: false,
+    isLoading: false,
+    login: vi.fn(),
+    logout: vi.fn(),
+    register: vi.fn(),
+  }),
 }));
 
 function setStorage(used: number | undefined, limit: number | undefined) {

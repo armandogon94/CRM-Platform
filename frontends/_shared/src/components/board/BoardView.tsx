@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import type { Board, Item, BoardView as BoardViewType } from '../../types/index';
 import { TableView } from './TableView';
 import { KanbanView } from './KanbanView';
@@ -8,7 +8,9 @@ import { ChartView } from './ChartView';
 import { FormView } from './FormView';
 import { DashboardView } from './DashboardView';
 import { MapView } from './MapView';
+import { BulkActionBar } from './BulkActionBar';
 import { useWorkspace } from '../../context/WorkspaceContext';
+import { useCanEdit } from '../../hooks/useCanEdit';
 
 interface BoardViewProps {
   board: Board;
@@ -17,6 +19,32 @@ interface BoardViewProps {
   onItemUpdate?: (itemId: number, columnId: number, value: any) => void;
   onItemCreate?: (groupId: number, name: string) => void;
   onItemDelete?: (itemId: number) => void;
+  /**
+   * Slice 21C D — bulk mutation handlers. Mirror the per-item callback
+   * pattern (`onItemUpdate` etc.); the consumer (industry BoardPage)
+   * wires these from `useBoard().bulkDelete / bulkUpdateValue /
+   * bulkAssign` (Phase A1). BoardView passes them through to
+   * BulkActionBar conditional on the `useCanEdit()` matrix so a viewer
+   * never sees CRUD affordances even if the parent passes the
+   * callbacks (defense in depth — the backend's 403 path is still
+   * authoritative).
+   *
+   * Naming follows the bar's prop contract (Phase C1):
+   *   onBulkDelete       — gated by canDelete
+   *   onBulkUpdateValue  — gated by canEditInline (status picker)
+   *   onBulkAssign       — gated by canEditInline (person picker, Phase E)
+   */
+  onBulkDelete?: (ids: number[]) => Promise<void>;
+  onBulkUpdateValue?: (
+    ids: number[],
+    columnId: number,
+    value: { label: string; color: string }
+  ) => Promise<void>;
+  onBulkAssign?: (
+    ids: number[],
+    columnId: number,
+    userIds: number[]
+  ) => Promise<void>;
 }
 
 /**
@@ -92,27 +120,65 @@ function QuotaIndicator(): React.ReactElement | null {
   );
 }
 
-function renderView(
-  board: Board,
-  items: Item[],
-  currentView: BoardViewType,
-  onItemUpdate?: BoardViewProps['onItemUpdate'],
-  onItemCreate?: BoardViewProps['onItemCreate'],
-  onItemDelete?: BoardViewProps['onItemDelete']
-): React.ReactElement {
+export const BoardView: React.FC<BoardViewProps> = ({
+  board,
+  items,
+  currentView,
+  onItemUpdate,
+  onItemCreate,
+  onItemDelete,
+  onBulkDelete,
+  onBulkUpdateValue,
+  onBulkAssign,
+}) => {
+  // Slice 21C D — selection mirror + clear token. Selection state still
+  // lives in TableView (D1a); BoardView keeps a parallel copy purely so
+  // BulkActionBar has something to render against. The token bumps
+  // every Clear / Dismiss so TableView's internal selection resets in
+  // lock-step with the bar's disappearance.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [clearToken, setClearToken] = useState(0);
+
+  const canEdit = useCanEdit();
+
+  const isTableView = currentView.viewType === 'table';
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+    setClearToken((t) => t + 1);
+  }, []);
+
+  // RBAC-gated handler set — `undefined` means BulkActionBar hides the
+  // corresponding button entirely (verified in C1 test #6). We avoid
+  // returning a stub that throws because the bar's affordance contract
+  // is "presence implies permission."
+  const gatedBulkDelete = canEdit.canDelete ? onBulkDelete : undefined;
+  const gatedBulkUpdateStatus = canEdit.canEditInline
+    ? onBulkUpdateValue
+    : undefined;
+  const gatedBulkAssign = canEdit.canEditInline ? onBulkAssign : undefined;
+
+  // Render the active view. We inline this (instead of the pre-21D
+  // helper) so TableView gets the selection-mirror props directly —
+  // pulling them through a function arg would just re-thread the same
+  // four references with no clarity benefit.
+  let viewElement: React.ReactElement;
   switch (currentView.viewType) {
     case 'table':
-      return (
+      viewElement = (
         <TableView
           board={board}
           items={items}
           onItemUpdate={onItemUpdate}
           onItemCreate={onItemCreate}
           onItemDelete={onItemDelete}
+          onSelectionChange={setSelectedIds}
+          clearSelectionToken={clearToken}
         />
       );
+      break;
     case 'kanban':
-      return (
+      viewElement = (
         <KanbanView
           board={board}
           items={items}
@@ -121,14 +187,18 @@ function renderView(
           onItemDelete={onItemDelete}
         />
       );
+      break;
     case 'calendar':
-      return <CalendarView board={board} items={items} />;
+      viewElement = <CalendarView board={board} items={items} />;
+      break;
     case 'timeline':
-      return <TimelineView board={board} items={items} />;
+      viewElement = <TimelineView board={board} items={items} />;
+      break;
     case 'chart':
-      return <ChartView board={board} items={items} />;
+      viewElement = <ChartView board={board} items={items} />;
+      break;
     case 'form':
-      return (
+      viewElement = (
         <FormView
           board={board}
           onSubmit={(name, _values) => {
@@ -136,31 +206,27 @@ function renderView(
           }}
         />
       );
+      break;
     case 'dashboard':
-      return <DashboardView board={board} />;
+      viewElement = <DashboardView board={board} />;
+      break;
     case 'map':
-      return <MapView board={board} items={items} />;
+      viewElement = <MapView board={board} items={items} />;
+      break;
     default:
-      return (
+      viewElement = (
         <TableView
           board={board}
           items={items}
           onItemUpdate={onItemUpdate}
           onItemCreate={onItemCreate}
           onItemDelete={onItemDelete}
+          onSelectionChange={setSelectedIds}
+          clearSelectionToken={clearToken}
         />
       );
   }
-}
 
-export const BoardView: React.FC<BoardViewProps> = ({
-  board,
-  items,
-  currentView,
-  onItemUpdate,
-  onItemCreate,
-  onItemDelete,
-}) => {
   return (
     <>
       {/* Header strip — currently only the quota indicator. Kept thin
@@ -174,7 +240,23 @@ export const BoardView: React.FC<BoardViewProps> = ({
       >
         <QuotaIndicator />
       </div>
-      {renderView(board, items, currentView, onItemUpdate, onItemCreate, onItemDelete)}
+      {viewElement}
+      {/* BulkActionBar is TableView-only this slice. Other views are
+          single-item-focused (Kanban drag, Calendar event drag, etc.)
+          and don't expose a multi-select surface. The bar self-hides
+          when selection is empty (C1) so this stays cheap on a fresh
+          load. */}
+      {isTableView && (
+        <BulkActionBar
+          selectedIds={selectedIds}
+          board={board}
+          items={items}
+          onClear={handleClearSelection}
+          onBulkDelete={gatedBulkDelete}
+          onBulkUpdateStatus={gatedBulkUpdateStatus}
+          onBulkAssign={gatedBulkAssign}
+        />
+      )}
     </>
   );
 };
