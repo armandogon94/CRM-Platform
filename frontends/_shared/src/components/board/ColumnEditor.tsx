@@ -136,222 +136,23 @@ export function ColumnEditor({ column, value, onChange, onBlur, meta }: ColumnEd
       );
     }
 
-    case 'person': {
-      // Slice 21B C1 — debounced member-search dropdown. Replaces the
-      // free-text stub with a real workspace lookup driven by Phase A's
-      // GET /workspaces/:id/members and Phase B's `searchMembers` +
-      // `useDebounce`. Single-assign vs multi-assign is gated by
-      // `column.config.allow_multiple` (defaults to false — single).
-      const allowMultiple =
-        (column.config as { allow_multiple?: boolean })?.allow_multiple === true;
-
-      // Workspace context drives the search scope. Reading via hook (not
-      // a prop) matches the `case 'files':` precedent in 21A C1 and
-      // avoids threading workspaceId through every Cell-level editor.
-      const ws = useWorkspace().workspace;
-      const workspaceId = ws?.id ?? 0;
-
-      const toast = useToast();
-      const [search, setSearch] = useState('');
-      const [members, setMembers] = useState<Member[]>([]);
-      // 300ms trailing-edge debounce — same window as Monday.com's
-      // person picker; balances "feels instant" with "doesn't hammer
-      // the API on every keystroke".
-      const debouncedSearch = useDebounce(search, 300);
-
-      // Normalise the cell value into an array of Member-shaped objects.
-      // Single-assign stores a single Member or null; multi-assign stores
-      // Member[]. Either way the UI reads from `currentAssignees` so the
-      // chip stack works for both modes (single ends up as a 1-length
-      // chip stack — visually equivalent, behaviourally simple).
-      const currentAssignees: Member[] = allowMultiple
-        ? (Array.isArray(value) ? (value as Member[]) : [])
-        : (value ? [value as Member] : []);
-
-      const atCap = allowMultiple && currentAssignees.length >= MULTI_ASSIGN_CAP;
-
-      useEffect(() => {
-        // AbortController plumbing → cancel stale in-flight requests
-        // when a newer keystroke fires (plan ADR / OQ #3). Debounce
-        // alone only cancels pending timers; without abort, a slow
-        // earlier fetch could resolve after a fast later one and
-        // out-of-order setMembers.
-        const controller = new AbortController();
-        api.workspaces
-          .searchMembers(workspaceId, debouncedSearch, {
-            signal: controller.signal,
-          })
-          .then((res) => {
-            if (res.success && res.data) {
-              setMembers(res.data.members);
-            }
-          });
-        return () => controller.abort();
-      }, [debouncedSearch, workspaceId]);
-
-      const removeAssignee = (id: number) => {
-        if (allowMultiple) {
-          const next = currentAssignees.filter((m) => m.id !== id);
-          onChange(next);
-        } else {
-          // Single-assign: remove === clear.
-          onChange(null);
-        }
-      };
-
-      const assign = (member: Member) => {
-        // Cap guard for multi-assign — defence in depth: the button is
-        // also disabled at-cap, but the click handler stays explicit so
-        // future call sites (keyboard, A11y) can't bypass the cap.
-        if (atCap) {
-          toast.show({
-            variant: 'warning',
-            title: 'Maximum 20 assignees per column',
-          });
-          return;
-        }
-
-        if (allowMultiple) {
-          // Append + dedupe by id (the row button is also disabled when
-          // already-assigned, but a stale render shouldn't be able to
-          // double-assign).
-          if (currentAssignees.some((a) => a.id === member.id)) return;
-          onChange([...currentAssignees, member]);
-          // Picker stays open for multi-assign — explicit non-call to
-          // onBlur. User clicks outside / Escape / Done to close.
-        } else {
-          onChange(member);
-          onBlur?.();
-        }
-      };
-
-      const clearAll = () => {
-        // Multi-assign convenience — wipe the whole array. We use [] not
-        // null so downstream JSON serialisation stays consistent (an
-        // empty array round-trips as `[]` rather than `null`).
-        onChange([]);
-      };
-
+    case 'person':
+      // Slice 21 review C1 — extracted to <PersonEditor> below so the
+      // hooks it needs (useState, useEffect, useDebounce, useWorkspace,
+      // useToast) call unconditionally inside their own component
+      // boundary, not inside a switch arm of the parent. Calling hooks
+      // inside switch cases violates the Rules of Hooks because hook
+      // call order changes when `column.columnType` changes between
+      // renders of the same ColumnEditor instance.
       return (
-        <div
-          className="bg-white border border-gray-200 rounded-lg shadow-lg p-2 min-w-[240px]"
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') onBlur?.();
-          }}
-        >
-          <input
-            ref={inputRef as React.RefObject<HTMLInputElement>}
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name or email..."
-            className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 outline-none mb-2"
-          />
-
-          {currentAssignees.length > 0 && (
-            <div className="flex flex-wrap gap-1 mb-2">
-              {currentAssignees.map((m) => {
-                const name = `${m.firstName} ${m.lastName}`.trim() || m.email;
-                return (
-                  <span
-                    key={m.id}
-                    className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 rounded-full pl-1 pr-2 py-0.5 text-xs"
-                  >
-                    {m.avatar ? (
-                      <img
-                        src={m.avatar}
-                        alt={name}
-                        className="w-5 h-5 rounded-full object-cover"
-                      />
-                    ) : (
-                      <PersonAvatar name={name} avatar={null} size="sm" />
-                    )}
-                    <span>{name}</span>
-                    <button
-                      type="button"
-                      aria-label={`Remove ${name}`}
-                      onClick={() => removeAssignee(m.id)}
-                      className="text-blue-400 hover:text-red-500"
-                    >
-                      <X size={12} />
-                    </button>
-                  </span>
-                );
-              })}
-            </div>
-          )}
-
-          {allowMultiple && currentAssignees.length > 0 && (
-            <button
-              type="button"
-              onClick={clearAll}
-              className="text-xs text-gray-500 hover:text-red-600 mb-2"
-            >
-              Clear all
-            </button>
-          )}
-
-          <div className="max-h-60 overflow-y-auto">
-            {members.map((m) => {
-              const name = `${m.firstName} ${m.lastName}`.trim() || m.email;
-              const alreadyAssigned = currentAssignees.some((a) => a.id === m.id);
-              // `alreadyAssigned` is a hard no-op (HTML `disabled` so the
-              // browser blocks the click entirely). `atCap` uses
-              // `aria-disabled` + click-handler short-circuit so the
-              // overflow click still fires and surfaces a toast — per
-              // spec, "emit a warning toast on attempted overflow click".
-              // Native `disabled` would swallow the event and the user
-              // would get no feedback.
-              const blockedByCap = atCap && !alreadyAssigned;
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => assign(m)}
-                  disabled={alreadyAssigned}
-                  aria-disabled={alreadyAssigned || blockedByCap}
-                  title={blockedByCap ? 'Maximum 20 assignees per column' : undefined}
-                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors ${
-                    alreadyAssigned || blockedByCap
-                      ? 'opacity-50 cursor-not-allowed'
-                      : 'hover:bg-gray-50'
-                  }`}
-                >
-                  {m.avatar ? (
-                    <img
-                      src={m.avatar}
-                      alt={name}
-                      className="w-7 h-7 rounded-full object-cover flex-shrink-0"
-                    />
-                  ) : (
-                    <PersonAvatar name={name} avatar={null} size="md" />
-                  )}
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-sm text-gray-900 truncate">{name}</span>
-                    <span className="text-xs text-gray-500 truncate">{m.email}</span>
-                  </div>
-                </button>
-              );
-            })}
-            {members.length === 0 && (
-              <div className="text-xs text-gray-400 text-center py-4">
-                No members found
-              </div>
-            )}
-          </div>
-
-          {allowMultiple && (
-            <button
-              type="button"
-              onClick={() => onBlur?.()}
-              className="w-full mt-2 text-sm text-center bg-gray-100 hover:bg-gray-200 py-1 rounded transition-colors"
-            >
-              Done
-            </button>
-          )}
-        </div>
+        <PersonEditor
+          column={column}
+          value={value}
+          onChange={onChange}
+          onBlur={onBlur}
+          inputRef={inputRef}
+        />
       );
-    }
 
     case 'email': {
       return (
@@ -567,65 +368,18 @@ export function ColumnEditor({ column, value, onChange, onBlur, meta }: ColumnEd
       );
     }
 
-    case 'files': {
-      // Files cell value is a FileAttachment[]. Normalize null/object
-      // shapes so callers that store `null` for empty cells still render
-      // a coherent empty list rather than crashing on `.map`.
-      const currentFiles: FileAttachment[] = Array.isArray(value)
-        ? (value as FileAttachment[])
-        : value
-        ? [value as FileAttachment]
-        : [];
-
-      // Without `meta` we can't post to the upload route — the route
-      // requires an `itemId`. Render the existing list read-only so
-      // callers like FormView (which precedes item creation) still see
-      // the field; once they pass `meta` the upload UI lights up.
-      if (!meta) {
-        return (
-          <ul className="space-y-1 text-sm" data-testid="file-uploader-readonly">
-            {currentFiles.map((file) => (
-              <li key={file.id} className="px-2 py-1 rounded bg-gray-50">
-                {file.originalName}
-              </li>
-            ))}
-          </ul>
-        );
-      }
-
-      // Quota budget comes from workspace context — surfaces the same
-      // numbers as the BoardView header indicator so the projection
-      // check matches the user's mental model. `storageLimit ?? 0`
-      // means a workspace without quota set blocks uploads, which is
-      // the safer default than letting unbounded uploads through.
-      const ws = useWorkspace().workspace;
-      const workspaceStorage = {
-        used: ws?.storageUsed ?? 0,
-        limit: ws?.storageLimit ?? 0,
-      };
-
+    case 'files':
+      // Slice 21 review C1 — extracted to <FilesEditor> below so the
+      // useWorkspace hook reads context unconditionally inside its own
+      // component, not inside a switch arm. Same Rules-of-Hooks
+      // rationale as the `case 'person':` extraction.
       return (
-        <FileUploader
-          itemId={meta.itemId}
-          columnValueId={meta.columnValueId}
-          files={currentFiles}
-          workspaceStorage={workspaceStorage}
-          onUploaded={(file) => {
-            // Optimistic local update — append the new file to the cell
-            // value and propagate via onChange so the row state
-            // reconciles immediately. The WS `file:created` echo from
-            // Phase D will land the same file shape; useBoard's handler
-            // is idempotent on `id`, so no double-apply.
-            onChange([...currentFiles, file]);
-          }}
-          onDeleted={(fileId) => {
-            // Mirror of onUploaded — filter the deleted id out and let
-            // the WS `file:deleted` echo confirm.
-            onChange(currentFiles.filter((f) => f.id !== fileId));
-          }}
+        <FilesEditor
+          value={value}
+          onChange={onChange}
+          meta={meta}
         />
       );
-    }
 
     default: {
       return (
@@ -641,4 +395,318 @@ export function ColumnEditor({ column, value, onChange, onBlur, meta }: ColumnEd
       );
     }
   }
+}
+
+// ─── Slice 21 review C1 — extracted sub-components ─────────────────────
+//
+// PersonEditor and FilesEditor were originally inlined inside
+// ColumnEditor's switch cases. That violated React's Rules of Hooks:
+// calling useState/useEffect/useDebounce/useWorkspace/useToast inside
+// `case 'person':` or `case 'files':` makes the hook call order depend
+// on `column.columnType`, so swapping the column type on the same
+// ColumnEditor instance triggers "Rendered more hooks than during the
+// previous render" at runtime.
+//
+// Extracting each case into its own React function component restores
+// the unconditional-hooks invariant. Each editor mounts and unmounts
+// cleanly when the parent switches branches; React tracks hooks
+// per-component, not per-render-of-a-parent.
+//
+// See `src/__tests__/ColumnEditor.hooks-order.test.tsx` for the
+// regression guard.
+
+interface PersonEditorProps {
+  column: Column;
+  value: any;
+  onChange: (value: any) => void;
+  onBlur?: () => void;
+  inputRef: React.RefObject<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>;
+}
+
+function PersonEditor({ column, value, onChange, onBlur, inputRef }: PersonEditorProps) {
+  // Slice 21B C1 — debounced member-search dropdown. Replaces the
+  // free-text stub with a real workspace lookup driven by Phase A's
+  // GET /workspaces/:id/members and Phase B's `searchMembers` +
+  // `useDebounce`. Single-assign vs multi-assign is gated by
+  // `column.config.allow_multiple` (defaults to false — single).
+  const allowMultiple =
+    (column.config as { allow_multiple?: boolean })?.allow_multiple === true;
+
+  // Workspace context drives the search scope. Reading via hook (not
+  // a prop) avoids threading workspaceId through every Cell-level
+  // editor.
+  const ws = useWorkspace().workspace;
+  const workspaceId = ws?.id ?? 0;
+
+  const toast = useToast();
+  const [search, setSearch] = useState('');
+  const [members, setMembers] = useState<Member[]>([]);
+  // 300ms trailing-edge debounce — same window as Monday.com's
+  // person picker; balances "feels instant" with "doesn't hammer
+  // the API on every keystroke".
+  const debouncedSearch = useDebounce(search, 300);
+
+  // Normalise the cell value into an array of Member-shaped objects.
+  // Single-assign stores a single Member or null; multi-assign stores
+  // Member[]. Either way the UI reads from `currentAssignees` so the
+  // chip stack works for both modes (single ends up as a 1-length
+  // chip stack — visually equivalent, behaviourally simple).
+  const currentAssignees: Member[] = allowMultiple
+    ? (Array.isArray(value) ? (value as Member[]) : [])
+    : (value ? [value as Member] : []);
+
+  const atCap = allowMultiple && currentAssignees.length >= MULTI_ASSIGN_CAP;
+
+  useEffect(() => {
+    // AbortController plumbing → cancel stale in-flight requests
+    // when a newer keystroke fires (plan ADR / OQ #3). Debounce
+    // alone only cancels pending timers; without abort, a slow
+    // earlier fetch could resolve after a fast later one and
+    // out-of-order setMembers.
+    const controller = new AbortController();
+    api.workspaces
+      .searchMembers(workspaceId, debouncedSearch, {
+        signal: controller.signal,
+      })
+      .then((res) => {
+        if (res.success && res.data) {
+          setMembers(res.data.members);
+        }
+      });
+    return () => controller.abort();
+  }, [debouncedSearch, workspaceId]);
+
+  const removeAssignee = (id: number) => {
+    if (allowMultiple) {
+      const next = currentAssignees.filter((m) => m.id !== id);
+      onChange(next);
+    } else {
+      // Single-assign: remove === clear.
+      onChange(null);
+    }
+  };
+
+  const assign = (member: Member) => {
+    // Cap guard for multi-assign — defence in depth: the button is
+    // also disabled at-cap, but the click handler stays explicit so
+    // future call sites (keyboard, A11y) can't bypass the cap.
+    if (atCap) {
+      toast.show({
+        variant: 'warning',
+        title: 'Maximum 20 assignees per column',
+      });
+      return;
+    }
+
+    if (allowMultiple) {
+      // Append + dedupe by id (the row button is also disabled when
+      // already-assigned, but a stale render shouldn't be able to
+      // double-assign).
+      if (currentAssignees.some((a) => a.id === member.id)) return;
+      onChange([...currentAssignees, member]);
+      // Picker stays open for multi-assign — explicit non-call to
+      // onBlur. User clicks outside / Escape / Done to close.
+    } else {
+      onChange(member);
+      onBlur?.();
+    }
+  };
+
+  const clearAll = () => {
+    // Multi-assign convenience — wipe the whole array. We use [] not
+    // null so downstream JSON serialisation stays consistent (an
+    // empty array round-trips as `[]` rather than `null`).
+    onChange([]);
+  };
+
+  return (
+    <div
+      className="bg-white border border-gray-200 rounded-lg shadow-lg p-2 min-w-[240px]"
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') onBlur?.();
+      }}
+    >
+      <input
+        ref={inputRef as React.RefObject<HTMLInputElement>}
+        type="text"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search by name or email..."
+        className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 outline-none mb-2"
+      />
+
+      {currentAssignees.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {currentAssignees.map((m) => {
+            const name = `${m.firstName} ${m.lastName}`.trim() || m.email;
+            return (
+              <span
+                key={m.id}
+                className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 rounded-full pl-1 pr-2 py-0.5 text-xs"
+              >
+                {m.avatar ? (
+                  <img
+                    src={m.avatar}
+                    alt={name}
+                    className="w-5 h-5 rounded-full object-cover"
+                  />
+                ) : (
+                  <PersonAvatar name={name} avatar={null} size="sm" />
+                )}
+                <span>{name}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${name}`}
+                  onClick={() => removeAssignee(m.id)}
+                  className="text-blue-400 hover:text-red-500"
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {allowMultiple && currentAssignees.length > 0 && (
+        <button
+          type="button"
+          onClick={clearAll}
+          className="text-xs text-gray-500 hover:text-red-600 mb-2"
+        >
+          Clear all
+        </button>
+      )}
+
+      <div className="max-h-60 overflow-y-auto">
+        {members.map((m) => {
+          const name = `${m.firstName} ${m.lastName}`.trim() || m.email;
+          const alreadyAssigned = currentAssignees.some((a) => a.id === m.id);
+          // `alreadyAssigned` is a hard no-op (HTML `disabled` so the
+          // browser blocks the click entirely). `atCap` uses
+          // `aria-disabled` + click-handler short-circuit so the
+          // overflow click still fires and surfaces a toast — per
+          // spec, "emit a warning toast on attempted overflow click".
+          // Native `disabled` would swallow the event and the user
+          // would get no feedback.
+          const blockedByCap = atCap && !alreadyAssigned;
+          return (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => assign(m)}
+              disabled={alreadyAssigned}
+              aria-disabled={alreadyAssigned || blockedByCap}
+              title={blockedByCap ? 'Maximum 20 assignees per column' : undefined}
+              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors ${
+                alreadyAssigned || blockedByCap
+                  ? 'opacity-50 cursor-not-allowed'
+                  : 'hover:bg-gray-50'
+              }`}
+            >
+              {m.avatar ? (
+                <img
+                  src={m.avatar}
+                  alt={name}
+                  className="w-7 h-7 rounded-full object-cover flex-shrink-0"
+                />
+              ) : (
+                <PersonAvatar name={name} avatar={null} size="md" />
+              )}
+              <div className="flex flex-col min-w-0">
+                <span className="text-sm text-gray-900 truncate">{name}</span>
+                <span className="text-xs text-gray-500 truncate">{m.email}</span>
+              </div>
+            </button>
+          );
+        })}
+        {members.length === 0 && (
+          <div className="text-xs text-gray-400 text-center py-4">
+            No members found
+          </div>
+        )}
+      </div>
+
+      {allowMultiple && (
+        <button
+          type="button"
+          onClick={() => onBlur?.()}
+          className="w-full mt-2 text-sm text-center bg-gray-100 hover:bg-gray-200 py-1 rounded transition-colors"
+        >
+          Done
+        </button>
+      )}
+    </div>
+  );
+}
+
+interface FilesEditorProps {
+  value: any;
+  onChange: (value: any) => void;
+  meta?: { itemId: number; columnValueId?: number };
+}
+
+function FilesEditor({ value, onChange, meta }: FilesEditorProps) {
+  // Files cell value is a FileAttachment[]. Normalize null/object
+  // shapes so callers that store `null` for empty cells still render
+  // a coherent empty list rather than crashing on `.map`.
+  const currentFiles: FileAttachment[] = Array.isArray(value)
+    ? (value as FileAttachment[])
+    : value
+    ? [value as FileAttachment]
+    : [];
+
+  // useWorkspace must be called unconditionally — moved out of the
+  // early-return branch so it runs on every render of FilesEditor.
+  // The hook itself is cheap; we just don't consume the value when
+  // `meta` is absent.
+  const ws = useWorkspace().workspace;
+
+  // Without `meta` we can't post to the upload route — the route
+  // requires an `itemId`. Render the existing list read-only so
+  // callers like FormView (which precedes item creation) still see
+  // the field; once they pass `meta` the upload UI lights up.
+  if (!meta) {
+    return (
+      <ul className="space-y-1 text-sm" data-testid="file-uploader-readonly">
+        {currentFiles.map((file) => (
+          <li key={file.id} className="px-2 py-1 rounded bg-gray-50">
+            {file.originalName}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  // Quota budget comes from workspace context — surfaces the same
+  // numbers as the BoardView header indicator so the projection
+  // check matches the user's mental model. `storageLimit ?? 0`
+  // means a workspace without quota set blocks uploads, which is
+  // the safer default than letting unbounded uploads through.
+  const workspaceStorage = {
+    used: ws?.storageUsed ?? 0,
+    limit: ws?.storageLimit ?? 0,
+  };
+
+  return (
+    <FileUploader
+      itemId={meta.itemId}
+      columnValueId={meta.columnValueId}
+      files={currentFiles}
+      workspaceStorage={workspaceStorage}
+      onUploaded={(file) => {
+        // Optimistic local update — append the new file to the cell
+        // value and propagate via onChange so the row state
+        // reconciles immediately. The WS `file:created` echo from
+        // Phase D will land the same file shape; useBoard's handler
+        // is idempotent on `id`, so no double-apply.
+        onChange([...currentFiles, file]);
+      }}
+      onDeleted={(fileId) => {
+        // Mirror of onUploaded — filter the deleted id out and let
+        // the WS `file:deleted` echo confirm.
+        onChange(currentFiles.filter((f) => f.id !== fileId));
+      }}
+    />
+  );
 }
