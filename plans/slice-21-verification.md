@@ -1,8 +1,9 @@
 # Slice 21 Verification — File Upload + Person Picker + Bulk Actions
 
-**Status:** ✅ Shipped (all 3 sub-slices, 22 commits, 1.4K LOC E2E + ~2.6K LOC shared)
-**Branch:** `main` @ `123905d`
+**Status:** ✅ Shipped + reviewed + 5 review-fix commits applied
+**Branch:** `main` @ `a154205`
 **Date completed:** 2026-04-26
+**Date reviewed + fixes shipped:** 2026-04-26
 
 ---
 
@@ -184,6 +185,24 @@ Slice 21's 22 commits ran across 9 agent waves (4 doc + 9 build) with file overl
 | E | file-upload.spec.ts (new) | person-picker.spec.ts (new) | bulk-actions.spec.ts (new) | Full parallel — 3 disjoint files |
 
 **Incidents:** Zero contaminated commits this slice. One transient bundling in 21B Phase B (commit `d90d45a`) was self-detected via post-commit `git show --stat`, soft-reset, and recommitted clean as `cc3b9dc`. No bad SHA reached origin.
+
+---
+
+## Review fixes (5 commits, post-`/review`)
+
+After the 5-axis code review (`code-review-and-quality` skill + `typescript-reviewer`, `security-reviewer`, `database-reviewer` specialist agents), 2 Critical and 3 Important findings were closed in atomic commits before ship-out:
+
+| Finding | Severity | Commit | Description |
+|---------|----------|--------|-------------|
+| **C1** | Critical | `64cb6f5` | Extracted `<PersonEditor>` + `<FilesEditor>` sub-components from `ColumnEditor`'s `switch` cases. Pre-fix, hooks (`useState`/`useEffect`/`useDebounce`/`useWorkspace`/`useToast`) called inside `case 'person':` and `case 'files':` violated Rules of Hooks — swapping column types on the same instance triggered "Rendered more hooks than during the previous render". Regression guard in `ColumnEditor.hooks-order.test.tsx`. |
+| **C2** | Critical (production scale) | `8d1ddd9` | New migration `20260426224440-add-users-workspace-id-index.js` adds partial B-tree index `idx_users_workspace_id ON users (workspace_id) WHERE deleted_at IS NULL`. `WorkspaceService.searchMembers` pre-filter no longer seq-scans the entire users table at production scale. |
+| **I1** | Important (security) | `aaa2fe1` | Replaced quoted-string Content-Disposition with RFC 5987 + sanitised legacy form via new exported `buildContentDisposition()` helper. Filenames containing `"`, `\r`, `\n` can no longer inject arbitrary headers in `GET /files/:id/download`. |
+| **I2** | Important (security) | `55b9dda` | Removed `image/svg+xml` from server `ALLOWED_MIME_TYPES` (`backend/src/routes/files.ts`). Stored XSS vector closed — uploaded SVGs would execute `<script>` when opened via the download URL. Client `FileUploader.tsx` allowlist narrowed from `image/*` prefix to explicit raster MIMEs. |
+| **I4** | Important (UX/correctness) | `a154205` | Widened `ConfirmDialog.onConfirm` to `() => void \| Promise<void>` with internal `.catch` for diagnosis. `BulkActionBar.handleDeleteConfirm` + `handleStatusPick` wrapped in `try/finally` so `onClear()` always runs even when the underlying mutation rejects — prevents "frozen selection" UX failure. |
+
+**Total review-fix delta:** +5 commits, +1,025 LOC, +5 new tests (152 → 157 shared + 8 → 9 backend files-route + 0 → 3 migration). All 5 commits pushed to origin/main in the order C1 → C2 → I1 → I2 → I4.
+
+**Deferred to future follow-ups (non-blocking):** I3 (client/server `application/json` MIME drift — needs product call), I5 (XHR `AbortSignal` plumbing — moderate effort), I6 (TableView Shift+click closure — edge case), I7 (`Op.or` cast cleanup — type-only refactor), I8 (ILIKE trigram index — only relevant >10K members), and 4 stylistic suggestions (S1–S6 from typescript-reviewer + S5 rate-limit suggestion from security-reviewer).
 
 ---
 
