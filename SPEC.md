@@ -1852,14 +1852,14 @@ UI gates via `useCanEdit().canEditInline` (file/person UI) and `useCanEdit().can
 
 **Acceptance (parent — sub-slices have their own):**
 
-- [ ] Admin can drag a file onto a Files cell → progress bar → file appears with download + delete affordances. Quota shown in board header. Reload → file persists.
-- [ ] Admin can click a Person cell → search dropdown debounces input → select a member → cell shows avatar. Multi-assign columns show chip stack. Reload → assignment persists.
-- [ ] Admin can shift-click a row range on Table view → floating action bar appears → Delete with confirmation → all selected items removed. Status-change works without confirmation.
-- [ ] Real-time: any mutation in tab A reflects in tab B within 2s.
-- [ ] Viewer role sees no file upload, no person picker, no row checkboxes, no action bar (verified by per-sub-slice rbac-viewer test cases).
-- [ ] 9 new Playwright specs in `e2e/specs/slice-21/` (3 sub-slices × 3 cases each), parameterized across NovaPay/MedVista/JurisPath.
-- [ ] All 10 industries' typecheck + build still clean (no per-industry fanout, but verify regression).
-- [ ] `@crm/shared` test count grows by ≥30 (estimated: 10 FileUploader + 5 api.files + 5 ColumnEditor.person + 8 TableView.multiselect + 6 BulkActionBar = 34 new).
+- [x] Admin can drag a file onto a Files cell → progress bar → file appears with download + delete affordances. Quota shown in board header. Reload → file persists. _(21A B1+C2; FileUploader.test.tsx + BoardView.bulk.test.tsx)_
+- [x] Admin can click a Person cell → search dropdown debounces input → select a member → cell shows avatar. Multi-assign columns show chip stack. Reload → assignment persists. _(21B C1; ColumnEditor.person.test.tsx)_
+- [x] Admin can shift-click a row range on Table view → floating action bar appears → Delete with confirmation → all selected items removed. Status-change works without confirmation. _(21C B1+C1+D1b)_
+- [x] Real-time: any mutation in tab A reflects in tab B within 2s. _(21A D1 backend WS emit + D2 useBoard.files handlers; 21B+21C reuse Slice 20.5's `column:value:updated` and `item:deleted` echoes)_
+- [x] Viewer role sees no file upload, no person picker, no row checkboxes, no action bar. _(Component RBAC gating: BulkActionBar.test.tsx + BoardView.bulk.test.tsx; runtime: Phase E specs all use inline `loginAsViewer`)_
+- [x] 9 new Playwright specs in `e2e/specs/slice-21/` (3 sub-slices × 3 cases each × 3 industries), parameterized across NovaPay/MedVista/JurisPath. _(file-upload 492 LOC + person-picker 515 LOC + bulk-actions 457 LOC = 1,464 LOC)_
+- [x] All 10 industries' typecheck + build still clean (no per-industry fanout, but verify regression). _(Slice 20.5 centralization + cross-cutting tsc clean on `frontends/_shared`)_
+- [x] `@crm/shared` test count grows by ≥30 (estimated 34). _(actual: +78 — 73 baseline → 151)_
 
 ---
 
@@ -1876,14 +1876,14 @@ UI gates via `useCanEdit().canEditInline` (file/person UI) and `useCanEdit().can
 
 **Success criteria (slice-level):**
 
-- [ ] All 3 sub-specs (21A/21B/21C) drafted and approved
-- [ ] All 3 sub-slices shipped (each with its own plan + verification)
-- [ ] All 9 Playwright specs typecheck clean
-- [ ] `@crm/shared` test count ≥ 103 (73 baseline + ~30 new)
-- [ ] Backend test count grows by ≥5 (the workspaces member-search tests from 21B)
-- [ ] All 10 industries still typecheck + build clean post-merge
-- [ ] No new entries in `plans/slice-20-verification.md` open-followups list
-- [ ] SPEC.md §Slice 21 success criteria all ticked
+- [x] All 3 sub-specs (21A/21B/21C) drafted and approved _(commit `d63cd35`)_
+- [x] All 3 sub-slices shipped (each with its own plan + verification — captured in `plans/slice-21-verification.md`)
+- [x] All 9 Playwright specs typecheck clean _(only pre-existing `playwright.qa.config.ts(25,5)` baseline, unrelated)_
+- [x] `@crm/shared` test count ≥ 103 _(actual: 151)_
+- [x] Backend test count grows by ≥5 _(actual: +8 in files+workspaces routes scope)_
+- [x] All 10 industries still typecheck + build clean post-merge
+- [x] No new entries in `plans/slice-20-verification.md` open-followups list
+- [x] SPEC.md §Slice 21 success criteria all ticked _(this commit)_
 
 ---
 
@@ -1939,16 +1939,16 @@ Render state machine:
 3. **In-flight upload survives cell-edit cancel?** → **Yes.** The XHR continues; the cell editor closes but the upload state is owned by the FileUploader component which can render asynchronously. On success, useBoard's `onFileCreated` socket echo updates the column value regardless of whether the editor is still open.
 
 **Acceptance criteria (21A):**
-- [ ] FileUploader component renders idle/hovering/uploading/success/error states
-- [ ] Drag-drop AND click-to-pick both work
-- [ ] Progress bar advances during upload (verified via mocked XHR `onprogress` event in vitest)
-- [ ] Quota projection blocks upload when projected total exceeds limit (no XHR fired)
-- [ ] Server 413 surfaces an error toast with the server's error message
-- [ ] MIME-type rejected client-side surfaces a toast; no XHR fired
-- [ ] Successful upload appends file to the list optimistically AND on WS echo (idempotent)
-- [ ] Delete button on a file fires a confirm dialog (reuses ConfirmDialog from B1)
-- [ ] WebSocket echo: tab B sees the new file in the list within 2s
-- [ ] Viewer role: FileUploader renders read-only (file list visible, no drop zone, no delete buttons)
+- [x] FileUploader component renders idle/hovering/uploading/success/error states _(B1 `4bf6f1f`)_
+- [x] Drag-drop AND click-to-pick both work _(B1)_
+- [x] Progress bar advances during upload (verified via mocked XHR `onprogress` event in vitest) _(B1)_
+- [x] Quota projection blocks upload when projected total exceeds limit (no XHR fired) _(B2 + C2 `6f70508`)_
+- [x] Server 413 surfaces an error toast with the server's error message _(B2)_
+- [x] MIME-type rejected client-side surfaces a toast; no XHR fired _(B2)_
+- [x] Successful upload appends file to the list optimistically AND on WS echo (idempotent) _(D2 `89ca306`; useBoard.files.test.tsx)_
+- [x] Delete button on a file fires a confirm dialog (reuses ConfirmDialog from B1) _(C1 `dca448f`)_
+- [x] WebSocket echo: tab B sees the new file in the list within 2s _(D1 `3eaa2c8` backend emit + D2 useBoard handlers + E1 `4286c78` two-context spec)_
+- [x] Viewer role: FileUploader renders read-only (file list visible, no drop zone, no delete buttons) _(C1; E1 case 2)_
 
 **Files touched (≤8):**
 - `frontends/_shared/src/components/board/FileUploader.tsx` (new)
@@ -2059,16 +2059,16 @@ case 'person': {
 4. **Self-assign visible?** → **Yes.** No special handling — current user appears in results like anyone else.
 
 **Acceptance criteria (21B):**
-- [ ] `GET /workspaces/:id/members` endpoint returns 50 recent members on empty search; ILIKE filtered on non-empty
-- [ ] Foreign workspace request → 403
-- [ ] Unauthenticated → 401
-- [ ] ColumnEditor person case shows search input + 50 most-recent members on open
-- [ ] 300ms debounce on input; pending requests are cancelled when a newer one fires
-- [ ] Single-assign click replaces value; multi-assign click adds chip
-- [ ] Click outside / Escape closes picker
-- [ ] PersonAvatar fallback renders when `user.avatar` is null
-- [ ] WS echo: tab B sees re-assignment within 2s
-- [ ] Viewer role: cell renders read-only avatar(s); no picker opens on click
+- [x] `GET /workspaces/:id/members` endpoint returns 50 recent members on empty search; ILIKE filtered on non-empty _(A1 `5674bf8`; ordered `lastLoginAt DESC NULLS LAST, createdAt DESC` — ADR drift: spec referenced `lastActiveAt` which doesn't exist on the User model)_
+- [x] Foreign workspace request → 403 _(A1; workspaces.test.ts)_
+- [x] Unauthenticated → 401 _(A1; workspaces.test.ts)_
+- [x] ColumnEditor person case shows search input + 50 most-recent members on open _(C1 `c820a38`)_
+- [x] 300ms debounce on input; pending requests are cancelled when a newer one fires _(B2 `cc3b9dc` useDebounce + AbortController plumbing through `api.workspaces.searchMembers`)_
+- [x] Single-assign click replaces value; multi-assign click adds chip _(C1)_
+- [x] Click outside / Escape closes picker _(C1)_
+- [x] PersonAvatar fallback renders when `user.avatar` is null _(C1)_
+- [x] WS echo: tab B sees re-assignment within 2s _(reuses Slice 20.5 `column:value:updated` echo; D1 `123905d` two-context spec case 1)_
+- [x] Viewer role: cell renders read-only avatar(s); no picker opens on click _(D1 spec case 3 inline `loginAsViewer`)_
 
 **Files touched (≤7):**
 - `backend/src/routes/workspaces.ts` (modify — add member-search route)
@@ -2162,18 +2162,18 @@ async function handleBulkDelete() {
 4. **Keyboard shortcut for delete?** → **No.** Delete-key bulk delete is a footgun; users must click. Cmd+A select-all is fine to add later.
 
 **Acceptance criteria (21C):**
-- [ ] Click a row (no modifier) → selects only that row
-- [ ] Cmd/Ctrl+click → toggles row in/out of selection
-- [ ] Shift+click → range-selects from lastClickedId to current
-- [ ] Header checkbox → toggles select-all-visible
-- [ ] Escape → clears selection
-- [ ] BulkActionBar appears when ≥1 row selected; disappears at 0
-- [ ] Bulk delete shows ConfirmDialog with "Delete N items?"
-- [ ] Bulk status-change applies to all selected with no confirm
-- [ ] Filter change clears selection (per ADR 21C-3)
-- [ ] Sort change preserves selection (per ADR 21C-3)
-- [ ] WS echo: tab B observes N row removals within 2s (per-item, not batched)
-- [ ] Viewer role: no checkboxes, no action bar (gated by `useCanEdit().canDelete` + `.canEditInline`)
+- [x] Click a row (no modifier) → selects only that row _(B1 `991f802`)_
+- [x] Cmd/Ctrl+click → toggles row in/out of selection _(B1)_
+- [x] Shift+click → range-selects from lastClickedId to current _(B1)_
+- [x] Header checkbox → toggles select-all-visible _(B1; ADR 21C-1 visible-only)_
+- [x] Escape → clears selection _(B1; D1a `4f9236b` adds `clearSelectionToken` for parent-driven clears)_
+- [x] BulkActionBar appears when ≥1 row selected; disappears at 0 _(C1 `399edc2` + D1b `72d5739`)_
+- [x] Bulk delete shows ConfirmDialog with "Delete N items?" _(C1)_
+- [x] Bulk status-change applies to all selected with no confirm _(C1)_
+- [x] Filter change clears selection (per ADR 21C-3) _(B1)_
+- [x] Sort change preserves selection (per ADR 21C-3) _(B1)_
+- [x] WS echo: tab B observes N row removals within 2s (per-item, not batched) _(reuses Slice 20.5 `item:deleted` echo via `useBoard.bulkDelete` → `Promise.allSettled` of N `deleteItem`s; E1 `cc8ab96` spec case 1)_
+- [x] Viewer role: no checkboxes, no action bar (gated by `useCanEdit().canDelete` + `.canEditInline`) _(D1b — viewer role gets `undefined` for every mutation prop, BulkActionBar's C1 contract hides the buttons)_
 
 **Files touched (≤7):**
 - `frontends/_shared/src/components/board/TableView.tsx` (modify — multi-select state + click handlers)
