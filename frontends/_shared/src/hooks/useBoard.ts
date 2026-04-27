@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Board, Item, BoardGroup, Column, ColumnValue } from '../types/index';
+import type { FileAttachment } from '../utils/api';
 import { useWebSocket } from './useWebSocket';
 import api from '../utils/api';
 import { useToast } from '../components/common/ToastProvider';
@@ -134,6 +135,22 @@ export function removeColumn(board: Board, columnId: number): Board {
   return { ...board, columns: board.columns.filter((c) => c.id !== columnId) };
 }
 
+// Slice 21A D2 — files-cell helpers. The `cv.value` for files-typed
+// column-values is a `FileAttachment[]` per the FileUploader contract
+// (see frontends/_shared/src/components/board/FileUploader.tsx). Both
+// helpers are idempotent so a duplicate WS echo (Socket.io reconnect
+// can replay events on resubscribe) doesn't double-apply.
+export function appendFile(value: unknown, file: FileAttachment): FileAttachment[] {
+  const existing: FileAttachment[] = Array.isArray(value) ? (value as FileAttachment[]) : [];
+  if (existing.some((f) => f.id === file.id)) return existing;
+  return [...existing, file];
+}
+
+export function removeFile(value: unknown, fileId: number): FileAttachment[] {
+  const existing: FileAttachment[] = Array.isArray(value) ? (value as FileAttachment[]) : [];
+  return existing.filter((f) => f.id !== fileId);
+}
+
 export function useBoard(boardId: number): UseBoardReturn {
   const [board, setBoard] = useState<Board | null>(null);
   const [items, setItems] = useState<Item[]>([]);
@@ -196,6 +213,52 @@ export function useBoard(boardId: number): UseBoardReturn {
     },
     onColumnDeleted: ({ id }: { id: number; boardId: number }) => {
       setBoard((prev) => (prev ? removeColumn(prev, id) : prev));
+    },
+    // Slice 21A D2 — file:created / file:deleted echoes (paired with
+    // backend D1 wsService.emitToBoard). Update the matching column-value
+    // when columnValueId is present; item-level orphans are no-ops in
+    // state since the backend D1 contract only emits when itemId is set.
+    onFileCreated: (data: {
+      file: FileAttachment;
+      itemId: number;
+      columnValueId?: number;
+    }) => {
+      if (!data.columnValueId) return;
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.id !== data.itemId) return item;
+          const cvs = item.columnValues || [];
+          return {
+            ...item,
+            columnValues: cvs.map((cv) =>
+              cv.id === data.columnValueId
+                ? ({ ...cv, value: appendFile(cv.value, data.file) } as ColumnValue)
+                : cv
+            ),
+          };
+        })
+      );
+    },
+    onFileDeleted: (data: {
+      fileId: number;
+      itemId: number;
+      columnValueId?: number;
+    }) => {
+      if (!data.columnValueId) return;
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.id !== data.itemId) return item;
+          const cvs = item.columnValues || [];
+          return {
+            ...item,
+            columnValues: cvs.map((cv) =>
+              cv.id === data.columnValueId
+                ? ({ ...cv, value: removeFile(cv.value, data.fileId) } as ColumnValue)
+                : cv
+            ),
+          };
+        })
+      );
     },
   });
 

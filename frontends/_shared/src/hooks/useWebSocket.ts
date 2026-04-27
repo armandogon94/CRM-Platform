@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import type { Item, ColumnValue, Notification } from '../types/index';
+import type { FileAttachment } from '../utils/api';
 
 interface WebSocketCallbacks {
   onItemCreated?: (item: Item) => void;
@@ -18,6 +19,21 @@ interface WebSocketCallbacks {
   onColumnUpdated?: (column: any) => void;
   onColumnDeleted?: (data: { id: number; boardId: number }) => void;
   onNotificationCreated?: (notification: Notification) => void;
+  // Slice 21A D2 — file:created / file:deleted echoes from POST /files/upload
+  // and DELETE /files/:id (see backend Slice 21A D1). itemId + columnValueId
+  // let consumers pinpoint which cell-value to mutate; columnValueId is
+  // optional because not every file is column-scoped (item-level orphans
+  // currently skip the emit, but the type permits future at-item flows).
+  onFileCreated?: (data: {
+    file: FileAttachment;
+    itemId: number;
+    columnValueId?: number;
+  }) => void;
+  onFileDeleted?: (data: {
+    fileId: number;
+    itemId: number;
+    columnValueId?: number;
+  }) => void;
 }
 
 interface UseWebSocketReturn {
@@ -120,6 +136,21 @@ export function useWebSocket(
     socket.on('notification:created', (notification: Notification) => {
       callbacksRef.current?.onNotificationCreated?.(notification);
     });
+
+    // Slice 21A D2 — file echoes (paired with backend D1 wsService.emitToBoard).
+    socket.on(
+      'file:created',
+      (data: { file: FileAttachment; itemId: number; columnValueId?: number }) => {
+        callbacksRef.current?.onFileCreated?.(data);
+      }
+    );
+
+    socket.on(
+      'file:deleted',
+      (data: { fileId: number; itemId: number; columnValueId?: number }) => {
+        callbacksRef.current?.onFileDeleted?.(data);
+      }
+    );
 
     return () => {
       if (boardId) {
