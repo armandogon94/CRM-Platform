@@ -7,6 +7,8 @@ import { AuthRequest } from '../types';
 import { successResponse, errorResponse } from '../utils/response';
 import config from '../config';
 import FileAttachment from '../models/FileAttachment';
+import Item from '../models/Item';
+import wsService from '../services/WebSocketService';
 import { storageService } from '../services/StorageService';
 
 const ALLOWED_MIME_TYPES = [
@@ -99,6 +101,22 @@ router.post('/upload', upload.single('file'), async (req: AuthRequest, res: Resp
       uploadedBy: req.user!.id,
     });
 
+    // Slice 21A D1: WebSocket echo for two-tab realtime. Scope the emit
+    // to the item's boardId (matches `column_value:changed` precedent —
+    // bounded fanout + RLS-equivalent scoping). Item-level orphans
+    // (no itemId) skip the emit; the realtime contract lives at the
+    // board level so an unanchored attachment has no consumer to update.
+    if (attachment.itemId) {
+      const item = await Item.findByPk(attachment.itemId);
+      if (item) {
+        wsService.emitToBoard(item.boardId, 'file:created', {
+          file: attachment,
+          itemId: attachment.itemId,
+          columnValueId: attachment.columnValueId,
+        });
+      }
+    }
+
     return successResponse(res, { file: attachment }, 'File uploaded', 201);
   } catch (error: any) {
     if (error.code === 'LIMIT_FILE_SIZE') {
@@ -156,6 +174,22 @@ router.delete('/:id', async (req: AuthRequest, res: Response) => {
     }
 
     await file.destroy(); // paranoid soft delete
+
+    // Slice 21A D1: symmetric WS echo for two-tab realtime — emit AFTER
+    // the destroy succeeds so consumers never see a phantom delete event
+    // for a file that's still in the DB. itemId/columnValueId scope the
+    // payload so the client handler can pinpoint which cell to update.
+    if (file.itemId) {
+      const item = await Item.findByPk(file.itemId);
+      if (item) {
+        wsService.emitToBoard(item.boardId, 'file:deleted', {
+          fileId: file.id,
+          itemId: file.itemId,
+          columnValueId: file.columnValueId,
+        });
+      }
+    }
+
     return successResponse(res, null, 'File deleted');
   } catch (error) {
     return errorResponse(res, 'Failed to delete file', 500);

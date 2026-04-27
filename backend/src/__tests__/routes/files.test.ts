@@ -70,6 +70,8 @@ jest.mock('../../services/WebSocketService', () => ({
 import request from 'supertest';
 import app from '../../app';
 import FileAttachment from '../../models/FileAttachment';
+import Item from '../../models/Item';
+import wsService from '../../services/WebSocketService';
 
 const mockedJwtVerify = jwt.verify as jest.MockedFunction<typeof jwt.verify>;
 
@@ -124,6 +126,67 @@ describe('File routes', () => {
         .set(...auth());
 
       expect(res.status).toBe(404);
+    });
+  });
+
+  // ── Slice 21A D1: WebSocket emit on upload + delete ─────────────────────
+  //
+  // Two-tab realtime echo: when admin uploads in tab A, tab B's useBoard
+  // onFileCreated handler must observe the change. Symmetrically for delete.
+  // Emits are scoped to the item's boardId (NOT workspaceId) — matches the
+  // `column_value:changed` precedent and bounds fanout to the relevant room.
+  describe('WebSocket emit (Slice 21A D1)', () => {
+    it('emits file:deleted on successful delete with fileId + itemId + columnValueId', async () => {
+      const file = {
+        id: 42,
+        workspaceId: 1,
+        itemId: 99,
+        columnValueId: 7,
+        filePath: '/tmp/test.pdf',
+        destroy: jest.fn(),
+      };
+      (FileAttachment.findByPk as jest.Mock).mockResolvedValue(file);
+      (Item.findByPk as jest.Mock).mockResolvedValue({ id: 99, boardId: 5 });
+
+      const res = await request(app)
+        .delete('/api/v1/files/42')
+        .set(...auth());
+
+      expect(res.status).toBe(200);
+      expect(wsService.emitToBoard).toHaveBeenCalledWith(5, 'file:deleted', {
+        fileId: 42,
+        itemId: 99,
+        columnValueId: 7,
+      });
+    });
+
+    it('does NOT emit file:deleted when delete fails (404 path)', async () => {
+      (FileAttachment.findByPk as jest.Mock).mockResolvedValue(null);
+
+      await request(app)
+        .delete('/api/v1/files/999')
+        .set(...auth());
+
+      expect(wsService.emitToBoard).not.toHaveBeenCalled();
+    });
+
+    it('does NOT emit file:deleted when file has no itemId (item-level orphan)', async () => {
+      const file = {
+        id: 50,
+        workspaceId: 1,
+        itemId: null,
+        columnValueId: null,
+        filePath: '/tmp/test.pdf',
+        destroy: jest.fn(),
+      };
+      (FileAttachment.findByPk as jest.Mock).mockResolvedValue(file);
+
+      const res = await request(app)
+        .delete('/api/v1/files/50')
+        .set(...auth());
+
+      expect(res.status).toBe(200);
+      expect(wsService.emitToBoard).not.toHaveBeenCalled();
     });
   });
 });
