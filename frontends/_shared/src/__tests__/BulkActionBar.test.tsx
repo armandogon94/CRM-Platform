@@ -247,4 +247,55 @@ describe('BulkActionBar', () => {
     expect(screen.queryByRole('button', { name: /change status/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /assign/i })).toBeNull();
   });
+
+  it('Slice 21 review I4: onClear still runs when onBulkDelete rejects (try/finally guard)', async () => {
+    const user = userEvent.setup();
+    // Pre-fix, handleDeleteConfirm awaited onBulkDelete and called
+    // onClear() after — a rejection threw out of the function and
+    // skipped the cleanup, leaving the bar mounted with a frozen
+    // selection. The post-fix try/finally guarantees onClear runs
+    // regardless of mutation outcome, so the user can recover by
+    // clicking Clear or selecting a different row.
+    const rejectingBulkDelete = vi.fn().mockRejectedValue(
+      new Error('simulated network failure')
+    );
+
+    // Suppress the expected unhandled-rejection log so the test
+    // output stays clean. (Widened ConfirmDialog onConfirm type
+    // means the promise propagates; that's the intended behavior,
+    // and it's React's job to surface it elsewhere.)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      render(
+        <BulkActionBar
+          selectedIds={new Set([10, 11])}
+          board={makeBoard()}
+          items={[makeItem(10), makeItem(11)]}
+          onClear={onClear}
+          onBulkDelete={rejectingBulkDelete}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: /^delete$/i }));
+      const dialog = screen.getByRole('dialog');
+      const confirmInDialog = dialog.querySelector(
+        'button.bg-red-600'
+      ) as HTMLButtonElement | null;
+      expect(confirmInDialog).toBeTruthy();
+      await user.click(confirmInDialog!);
+
+      // Allow the rejected promise + try/finally to settle.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // The mutation was attempted...
+      expect(rejectingBulkDelete).toHaveBeenCalledTimes(1);
+      // ...and onClear ran despite the rejection — the load-bearing
+      // assertion this test exists for.
+      expect(onClear).toHaveBeenCalledTimes(1);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
 });

@@ -27,7 +27,16 @@ export interface ConfirmDialogProps {
   cancelLabel?: string;
   /** Visual treatment — 'danger' uses red confirm button for deletes. */
   variant?: 'danger' | 'default';
-  onConfirm: () => void;
+  /**
+   * Slice 21 review I4 — return type widened to `void | Promise<void>`
+   * so async confirm handlers can `await` mutations without their
+   * rejections being silently swallowed by the dialog's `onClick`
+   * synchronous discard. Callers should still own their own try/catch
+   * for state cleanup (see BulkActionBar.handleDeleteConfirm), but
+   * letting the promise propagate at least surfaces to the
+   * unhandled-rejection channel.
+   */
+  onConfirm: () => void | Promise<void>;
   onCancel: () => void;
 }
 
@@ -113,7 +122,22 @@ export function ConfirmDialog({
           </button>
           <button
             type="button"
-            onClick={onConfirm}
+            onClick={() => {
+              // Slice 21 review I4 — onConfirm is widened to
+              // `() => void | Promise<void>`. Wrap the call in a
+              // .catch so a rejected promise is logged for diagnosis
+              // but doesn't escape into Node's unhandled-rejection
+              // channel. Callers (e.g. BulkActionBar.handleDeleteConfirm)
+              // own their own try/finally for state cleanup; this
+              // .catch is the dialog's last-ditch safety net.
+              const result = onConfirm();
+              if (result instanceof Promise) {
+                result.catch((err) => {
+                  // eslint-disable-next-line no-console
+                  console.error('ConfirmDialog onConfirm rejected:', err);
+                });
+              }
+            }}
             className={`px-4 py-2 text-sm font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 ${confirmButtonClass}`}
           >
             {confirmLabel}

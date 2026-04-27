@@ -137,15 +137,33 @@ export function BulkActionBar({
   async function handleDeleteConfirm() {
     if (!onBulkDelete) return;
     setConfirmOpen(false);
-    await onBulkDelete(ids);
-    onClear();
+    // Slice 21 review I4 — onBulkDelete CAN reject (per-item failures
+    // bubble up through useBoard.bulkDelete's Promise.allSettled
+    // aggregator only when the wrapper itself throws, but a future
+    // refactor or transient network error could surface a rejection
+    // here). Without try/finally, a thrown error would leave selection
+    // frozen forever (the bar stays mounted, blocking further input).
+    // The dialog's onConfirm widened type means the promise propagates
+    // to React's unhandled-rejection channel, so silent swallow is now
+    // impossible — but UI cleanup still has to happen here.
+    try {
+      await onBulkDelete(ids);
+    } finally {
+      onClear();
+    }
   }
 
   async function handleStatusPick(opt: StatusOption) {
     if (!onBulkUpdateStatus || !statusColumn) return;
     setStatusPickerOpen(false);
-    await onBulkUpdateStatus(ids, statusColumn.id, opt);
-    onClear();
+    // Same I4 rationale as handleDeleteConfirm — onClear must run
+    // even if the bulk update rejects, so the user isn't stuck with
+    // a frozen selection.
+    try {
+      await onBulkUpdateStatus(ids, statusColumn.id, opt);
+    } finally {
+      onClear();
+    }
   }
 
   return (
