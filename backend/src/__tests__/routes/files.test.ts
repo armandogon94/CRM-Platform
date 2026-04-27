@@ -189,4 +189,47 @@ describe('File routes', () => {
       expect(wsService.emitToBoard).not.toHaveBeenCalled();
     });
   });
+
+  describe('buildContentDisposition (Slice 21 review I1)', () => {
+    it('encodes filename with RFC 5987 + sanitises legacy filename for header-injection-safe download', () => {
+      // The helper is exported from routes/files.ts so we can unit-test
+      // the encoding logic in isolation, without standing up the full
+      // download route stack (which streams a real fs.ReadStream into
+      // the Express response and is finicky to mock through supertest).
+      const { buildContentDisposition } = require('../../routes/files');
+
+      // Filename containing every metacharacter the pre-fix code
+      // would have allowed to break out of the quoted-string token:
+      // a literal double quote, CR, LF, and a backslash. Plus a
+      // unicode character to exercise the URL-encoding path.
+      const evilName = 'a"b\rc\nd\\e — résumé.txt';
+      const cd: string = buildContentDisposition(evilName);
+
+      // Both forms are present.
+      expect(cd).toMatch(/^attachment; filename="[^"]*"; filename\*=UTF-8''/);
+
+      // The legacy `filename="..."` form is sanitised — every
+      // injection metacharacter is stripped to `_`, so a
+      // header-parsing client can never escape the quoted token.
+      const legacyMatch = cd.match(/filename="([^"]*)"/);
+      expect(legacyMatch).not.toBeNull();
+      const legacy = legacyMatch![1];
+      expect(legacy).not.toContain('"');
+      expect(legacy).not.toContain('\r');
+      expect(legacy).not.toContain('\n');
+      expect(legacy).not.toContain('\\');
+
+      // The RFC 5987 form is the percent-encoded original — clients
+      // that decode `filename*` get the user's true filename
+      // (including the unicode em dash and accented characters).
+      const rfcMatch = cd.match(/filename\*=UTF-8''([^;\s]+)/);
+      expect(rfcMatch).not.toBeNull();
+      expect(decodeURIComponent(rfcMatch![1])).toBe(evilName);
+
+      // The output as a whole contains no raw CR/LF — the load-bearing
+      // header-injection guarantee.
+      expect(cd).not.toContain('\r');
+      expect(cd).not.toContain('\n');
+    });
+  });
 });

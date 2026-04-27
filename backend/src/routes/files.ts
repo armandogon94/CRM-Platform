@@ -24,6 +24,32 @@ const ALLOWED_MIME_TYPES = [
 
 const MAX_FILE_SIZE = config.upload?.maxFileSize || 10485760; // 10MB
 
+/**
+ * Slice 21 review I1 — encodes a user-supplied filename into a
+ * Content-Disposition header value that is safe against CRLF injection
+ * and quote-escape attacks.
+ *
+ * The legacy quoted-string form `filename="${name}"` lets a hostile
+ * filename break out of the quoted token (e.g. `evil"\r\nX-Injected: x`)
+ * and inject arbitrary headers. We mitigate via two complementary
+ * defences:
+ *   1. Strip CR/LF/quote/backslash from the legacy `filename=` form
+ *      so old clients that don't speak RFC 5987 still get a safe
+ *      response.
+ *   2. Add the RFC 5987 `filename*=UTF-8''<percent-encoded>` form
+ *      which is universally supported by modern browsers and
+ *      encoding-safe by construction (URL-encoded values can't
+ *      contain CR/LF/quotes).
+ *
+ * Exported so the unit test can call it directly without standing
+ * up the full download route stack.
+ */
+export function buildContentDisposition(originalName: string): string {
+  const safeName = originalName.replace(/["\r\n\\]/g, '_');
+  const encoded = encodeURIComponent(originalName);
+  return `attachment; filename="${safeName}"; filename*=UTF-8''${encoded}`;
+}
+
 const storage = multer.diskStorage({
   destination: (req: any, _file, cb) => {
     const workspaceId = req.user?.workspaceId || 1;
@@ -149,7 +175,10 @@ router.get('/:id/download', async (req: AuthRequest, res: Response) => {
     }
 
     res.setHeader('Content-Type', file.mimeType);
-    res.setHeader('Content-Disposition', `attachment; filename="${file.originalName}"`);
+    res.setHeader(
+      'Content-Disposition',
+      buildContentDisposition(file.originalName)
+    );
     fs.createReadStream(filePath).pipe(res);
   } catch (error) {
     return errorResponse(res, 'Failed to download file', 500);
