@@ -288,4 +288,88 @@ describe('TableView — multi-select state (Slice 21C B1)', () => {
     expect(getRowCheckbox(11).checked).toBe(false);
     expect(getRowCheckbox(12).checked).toBe(false);
   });
+
+  // ── Phase D — selection lift via callback + clearSelectionToken ──
+  //
+  // TableView still owns selection state. Phase D adds two optional
+  // contracts so BoardView can mirror the selection (to render
+  // BulkActionBar) and force a clear (when the user dismisses the bar
+  // without unchecking each row). The TableView remains the source of
+  // truth — these props are observers + a one-way reset signal, not a
+  // controlled-component handoff.
+
+  it('onSelectionChange fires with the current Set on each click change', async () => {
+    const user = userEvent.setup();
+    const onSelectionChange = vi.fn();
+    render(
+      <TableView
+        board={BOARD}
+        items={ITEMS}
+        onSelectionChange={onSelectionChange}
+      />
+    );
+
+    // Initial render fires once with an empty Set so consumers can
+    // mirror the starting state without a special-case undefined check.
+    expect(onSelectionChange).toHaveBeenCalled();
+    const firstCall = onSelectionChange.mock.calls[0][0] as Set<number>;
+    expect(firstCall.size).toBe(0);
+    onSelectionChange.mockClear();
+
+    await user.click(getRowCheckbox(10));
+    // After the click the latest call should reflect [10]
+    const afterFirstClick = onSelectionChange.mock.calls[
+      onSelectionChange.mock.calls.length - 1
+    ][0] as Set<number>;
+    expect(afterFirstClick.has(10)).toBe(true);
+    expect(afterFirstClick.size).toBe(1);
+
+    onSelectionChange.mockClear();
+    await user.keyboard('{Meta>}');
+    await user.click(getRowCheckbox(11));
+    await user.keyboard('{/Meta}');
+    const afterSecondClick = onSelectionChange.mock.calls[
+      onSelectionChange.mock.calls.length - 1
+    ][0] as Set<number>;
+    expect(afterSecondClick.has(10)).toBe(true);
+    expect(afterSecondClick.has(11)).toBe(true);
+    expect(afterSecondClick.size).toBe(2);
+  });
+
+  it('clearSelectionToken change clears the internal selection', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <TableView board={BOARD} items={ITEMS} clearSelectionToken={0} />
+    );
+
+    await user.keyboard('{Meta>}');
+    await user.click(getRowCheckbox(10));
+    await user.click(getRowCheckbox(11));
+    await user.keyboard('{/Meta}');
+    expect(getRowCheckbox(10).checked).toBe(true);
+    expect(getRowCheckbox(11).checked).toBe(true);
+
+    // Bumping the token mirrors what BoardView does when BulkActionBar's
+    // Clear/Dismiss is fired. Same items, same filterKey → only the
+    // token reset clears the selection.
+    rerender(<TableView board={BOARD} items={ITEMS} clearSelectionToken={1} />);
+
+    expect(getRowCheckbox(10).checked).toBe(false);
+    expect(getRowCheckbox(11).checked).toBe(false);
+  });
+
+  it('clearSelectionToken stable value does not clear (must change to fire)', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <TableView board={BOARD} items={ITEMS} clearSelectionToken={42} />
+    );
+
+    await user.click(getRowCheckbox(10));
+    expect(getRowCheckbox(10).checked).toBe(true);
+
+    // Re-render with the SAME token — selection must persist. This
+    // proves the clear is keyed on token *change*, not on token presence.
+    rerender(<TableView board={BOARD} items={ITEMS} clearSelectionToken={42} />);
+    expect(getRowCheckbox(10).checked).toBe(true);
+  });
 });

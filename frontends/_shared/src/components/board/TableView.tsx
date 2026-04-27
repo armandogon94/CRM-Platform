@@ -38,6 +38,27 @@ interface TableViewProps {
    * optional so existing callers compile unchanged.
    */
   filterKey?: string | number;
+  /**
+   * Phase D — selection mirror. Fires whenever the internal selection
+   * changes (including the initial empty Set on mount), so BoardView
+   * can render `<BulkActionBar>` against the same id set without
+   * reaching into TableView's state.
+   *
+   * TableView retains ownership of the selection — this is a one-way
+   * notifier, not a controlled-component handoff. Keeping ownership
+   * inside TableView means the click matrix, filter-clear, and Escape
+   * handlers (B1) stay self-contained and don't grow controlled-prop
+   * branches.
+   */
+  onSelectionChange?: (selectedIds: Set<number>) => void;
+  /**
+   * Phase D — imperative clear via token bump. When this value
+   * *changes*, TableView resets its selection + lastClickedId. The
+   * stable-value path is a no-op so a parent that always passes `0`
+   * doesn't wipe selection on every re-render. BulkActionBar's Clear
+   * / Dismiss callbacks bump this from BoardView to mirror.
+   */
+  clearSelectionToken?: number;
 }
 
 const columnTypeIcons: Record<string, React.ElementType> = {
@@ -349,10 +370,37 @@ export function TableView({
   onItemCreate,
   onItemDelete: _onItemDelete,
   filterKey,
+  onSelectionChange,
+  clearSelectionToken,
 }: TableViewProps) {
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [lastClickedId, setLastClickedId] = useState<number | null>(null);
+
+  // Phase D — mirror selection upstream. Fires on mount with the empty
+  // Set and on every transition. Effect (vs inline setState callback)
+  // keeps the parent notification deferred until after commit, avoiding
+  // setState-during-render warnings.
+  useEffect(() => {
+    onSelectionChange?.(selectedIds);
+  }, [selectedIds, onSelectionChange]);
+
+  // Phase D — imperative clear via token bump. We track the previous
+  // token in a ref so the effect only fires when the value *changes*.
+  // This keeps the contract simple (no special undefined handling) and
+  // avoids wiping selection on benign re-renders that pass the same
+  // token. The initial-mount run is intentionally guarded — TableView
+  // boots with empty selection anyway, so a same-value first run would
+  // be a no-op, and skipping it keeps onSelectionChange's mount call
+  // semantics clean.
+  const lastClearToken = useRef<number | undefined>(clearSelectionToken);
+  useEffect(() => {
+    if (lastClearToken.current !== clearSelectionToken) {
+      lastClearToken.current = clearSelectionToken;
+      setSelectedIds(new Set());
+      setLastClickedId(null);
+    }
+  }, [clearSelectionToken]);
 
   const columns = (board.columns || []).sort((a, b) => a.position - b.position);
   const groups = (board.groups || []).sort((a, b) => a.position - b.position);
