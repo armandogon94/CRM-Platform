@@ -141,6 +141,22 @@ async function createPatientPipeline(ctx: MedVistaContext): Promise<BoardContext
         ],
       },
     },
+    // Slice 21 follow-up — multi-assign Person column (closes verification follow-up #1)
+    {
+      name: 'Care Team',
+      columnType: 'person' as const,
+      position: 9,
+      width: 180,
+      config: { allow_multiple: true },
+    },
+    // Slice 21 follow-up — Files-type column (closes verification follow-up #4)
+    {
+      name: 'Attachments',
+      columnType: 'files' as const,
+      position: 10,
+      width: 160,
+      config: { max_files: 10 },
+    },
   ];
 
   for (const col of colDefs) {

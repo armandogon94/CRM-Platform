@@ -189,11 +189,11 @@ Slice 21's 22 commits ran across 9 agent waves (4 doc + 9 build) with file overl
 
 ## Open follow-ups (non-blocking, future minor slices)
 
-1. **Multi-assign Person columns in seed data** — every industry's primary-board Person column is `allow_multiple: false`. Phase E D1 case 2 documents the skip; if runtime coverage of the multi-assign code path matters, a one-column-per-industry seed addition would close it.
-2. **Bulk Assign full picker integration** — C1 ships Assign as a "Coming soon" placeholder. The `bulkAssign` useBoard wrapper exists; needs a Person-picker-in-modal UX (reuses 21B's picker with a multi-select harness). Estimated 1 small slice.
-3. **Workspace storage refresh on upload echo** — `useBoard.onFileCreated` updates the file list but doesn't update `useWorkspace().storageUsed`. Spec §21A OQ #1 deferred to "let the next workspace re-fetch handle it" — if drift becomes visible (e.g. quota indicator stale across an hour-long board session), add an additive `workspace:storage:updated` WS event.
-4. **Files-type column in seeds** — Phase E E1 case 1 will `test.skip` if no Files column exists on the seeded primary board. If runtime coverage matters, add one Files column per industry's primary board.
-5. **Member-search GIN trigram index** — current ILIKE on three User columns is fine for member counts in the hundreds. ADR 21B-1 keeps the door open for a Postgres trigram index if explain plans show seq scan in production with workspaces >10K members.
+> **Closed in Slice 21 follow-up commit:** original follow-ups #1 (multi-assign Person columns in seeds) and #4 (Files-type column in seeds) — both addressed by adding "Reviewers" (Person, `allow_multiple: true`) and "Attachments"/"Care Team"/"Case Documents" (Files) columns to NovaPay/MedVista/JurisPath primary boards. Phase E `person-picker.spec.ts` Case 2 + `file-upload.spec.ts` Cases 1–3 now exercise their code paths at runtime.
+
+1. **Bulk Assign full picker integration** — C1 ships Assign as a "Coming soon" placeholder. The `bulkAssign` useBoard wrapper exists; needs a Person-picker-in-modal UX (reuses 21B's picker with a multi-select harness). Estimated 1 small slice.
+2. **Workspace storage refresh on upload echo** — `useBoard.onFileCreated` updates the file list but doesn't update `useWorkspace().storageUsed`. Spec §21A OQ #1 deferred to "let the next workspace re-fetch handle it" — if drift becomes visible (e.g. quota indicator stale across an hour-long board session), add an additive `workspace:storage:updated` WS event.
+3. **Member-search GIN trigram index** — current ILIKE on three User columns is fine for member counts in the hundreds. ADR 21B-1 keeps the door open for a Postgres trigram index if explain plans show seq scan in production with workspaces >10K members.
 
 ---
 

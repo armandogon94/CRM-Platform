@@ -117,6 +117,22 @@ async function createCaseManagement(ctx: JurisPathContext): Promise<BoardContext
       width: 280,
       config: {},
     },
+    // Slice 21 follow-up — multi-assign Person column (closes verification follow-up #1)
+    {
+      name: 'Reviewers',
+      columnType: 'person' as const,
+      position: 7,
+      width: 180,
+      config: { allow_multiple: true },
+    },
+    // Slice 21 follow-up — Files-type column (closes verification follow-up #4)
+    {
+      name: 'Case Documents',
+      columnType: 'files' as const,
+      position: 8,
+      width: 180,
+      config: { max_files: 20 },
+    },
   ];
 
   for (const col of colDefs) {
