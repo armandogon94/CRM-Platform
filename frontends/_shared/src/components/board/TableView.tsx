@@ -307,6 +307,18 @@ function GroupSection({
                               value={cellValue}
                               onChange={(newValue) => onCellChange(item.id, col.id, newValue)}
                               onBlur={onCellBlur}
+                              // Slice 21A D — thread item + column-value identity so
+                              // ColumnEditor's `case 'files':` can mount <FileUploader>
+                              // (the upload route requires itemId; columnValueId scopes
+                              // the attachment to the specific cell). Other column types
+                              // ignore `meta`. columnValueId is undefined when the cell
+                              // has no row in column_values yet — the route accepts that.
+                              meta={{
+                                itemId: item.id,
+                                columnValueId: item.columnValues?.find(
+                                  (cv: ColumnValue) => cv.columnId === col.id
+                                )?.id,
+                              }}
                             />
                           ) : (
                             <ColumnRenderer column={col} value={cellValue} compact />
